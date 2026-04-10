@@ -19,6 +19,8 @@ import threading
 import time
 import uuid
 
+import requests
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - Windows fallback
@@ -603,9 +605,50 @@ class AioSandboxProvider(SandboxProvider):
         """
         with self._lock:
             sandbox = self._sandboxes.get(sandbox_id)
+        if sandbox is None:
+            return None
+
+        # Cached AIO sandboxes can outlive the underlying container/URL.
+        # Probe before returning so callers do not execute against a dead endpoint.
+        if isinstance(sandbox, AioSandbox) and not self._sandbox_url_is_healthy(sandbox.base_url):
+            logger.warning(f"Sandbox {sandbox_id} at {sandbox.base_url} is unreachable, attempting rediscovery")
+            return self._recover_stale_sandbox(sandbox_id)
+
+        with self._lock:
+            sandbox = self._sandboxes.get(sandbox_id)
             if sandbox is not None:
                 self._last_activity[sandbox_id] = time.time()
             return sandbox
+
+    @staticmethod
+    def _sandbox_url_is_healthy(sandbox_url: str) -> bool:
+        """Return whether the sandbox HTTP endpoint is reachable."""
+        try:
+            response = requests.get(f"{sandbox_url}/v1/sandbox", timeout=2)
+            return response.status_code == 200
+        except requests.exceptions.RequestException:
+            return False
+
+    def _recover_stale_sandbox(self, sandbox_id: str) -> Sandbox | None:
+        """Drop a stale cached sandbox and rediscover the current live endpoint."""
+        discovered = self._backend.discover(sandbox_id)
+
+        with self._lock:
+            self._sandboxes.pop(sandbox_id, None)
+            self._sandbox_infos.pop(sandbox_id, None)
+            self._last_activity.pop(sandbox_id, None)
+
+            if discovered is None:
+                logger.warning(f"Sandbox {sandbox_id} could not be rediscovered after health-check failure")
+                return None
+
+            sandbox = AioSandbox(id=discovered.sandbox_id, base_url=discovered.sandbox_url)
+            self._sandboxes[discovered.sandbox_id] = sandbox
+            self._sandbox_infos[discovered.sandbox_id] = discovered
+            self._last_activity[discovered.sandbox_id] = time.time()
+
+        logger.info(f"Recovered sandbox {sandbox_id} at {discovered.sandbox_url}")
+        return sandbox
 
     def release(self, sandbox_id: str) -> None:
         """Release a sandbox from active use into the warm pool.

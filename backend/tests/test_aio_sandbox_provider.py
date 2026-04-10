@@ -1,10 +1,13 @@
-"""Tests for AioSandboxProvider mount helpers."""
+"""Tests for AioSandboxProvider helpers and recovery paths."""
 
 import importlib
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
+from deerflow.community.aio_sandbox.sandbox_info import SandboxInfo
 from deerflow.config.paths import Paths, join_host_path
 
 # ── ensure_thread_dirs ───────────────────────────────────────────────────────
@@ -48,8 +51,15 @@ def _make_provider(tmp_path):
         provider = aio_mod.AioSandboxProvider.__new__(aio_mod.AioSandboxProvider)
         provider._config = {}
         provider._sandboxes = {}
-        provider._lock = MagicMock()
+        provider._sandbox_infos = {}
+        provider._thread_sandboxes = {}
+        provider._thread_locks = {}
+        provider._last_activity = {}
+        provider._warm_pool = {}
+        provider._lock = threading.Lock()
+        provider._backend = MagicMock()
         provider._idle_checker_stop = MagicMock()
+        provider._idle_checker_thread = None
     return provider
 
 
@@ -134,3 +144,70 @@ def test_discover_or_create_only_unlocks_when_lock_succeeds(tmp_path, monkeypatc
             provider._discover_or_create_with_lock("thread-5", "sandbox-5")
 
     assert unlock_calls == []
+
+
+def test_get_rediscovers_stale_cached_sandbox(tmp_path, monkeypatch):
+    """If the cached sandbox URL is dead, get() should rediscover and refresh it."""
+    aio_mod = importlib.import_module("deerflow.community.aio_sandbox.aio_sandbox_provider")
+    provider = _make_provider(tmp_path)
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox.AioSandboxClient"):
+        stale = aio_mod.AioSandbox(id="sandbox-1", base_url="http://stale-host:8080")
+
+    provider._sandboxes["sandbox-1"] = stale
+    provider._sandbox_infos["sandbox-1"] = SandboxInfo(
+        sandbox_id="sandbox-1",
+        sandbox_url="http://stale-host:8080",
+        container_name="deer-flow-sandbox-sandbox-1",
+    )
+    provider._thread_sandboxes["thread-1"] = "sandbox-1"
+    provider._last_activity["sandbox-1"] = 1.0
+
+    provider._backend.discover.return_value = SandboxInfo(
+        sandbox_id="sandbox-1",
+        sandbox_url="http://fresh-host:9090",
+        container_name="deer-flow-sandbox-sandbox-1",
+    )
+
+    def _raise_connection_error(*args, **kwargs):
+        raise requests.exceptions.ConnectionError("Connection refused")
+
+    monkeypatch.setattr(requests, "get", _raise_connection_error)
+
+    refreshed = provider.get("sandbox-1")
+
+    assert refreshed is not None
+    assert refreshed is not stale
+    assert refreshed.base_url == "http://fresh-host:9090"
+    assert provider._sandbox_infos["sandbox-1"].sandbox_url == "http://fresh-host:9090"
+
+
+def test_get_returns_none_when_cached_sandbox_cannot_be_rediscovered(tmp_path, monkeypatch):
+    """If the cached sandbox URL is dead and discover() fails, get() should return None."""
+    aio_mod = importlib.import_module("deerflow.community.aio_sandbox.aio_sandbox_provider")
+    provider = _make_provider(tmp_path)
+
+    with patch("deerflow.community.aio_sandbox.aio_sandbox.AioSandboxClient"):
+        stale = aio_mod.AioSandbox(id="sandbox-2", base_url="http://dead-host:8080")
+
+    provider._sandboxes["sandbox-2"] = stale
+    provider._sandbox_infos["sandbox-2"] = SandboxInfo(
+        sandbox_id="sandbox-2",
+        sandbox_url="http://dead-host:8080",
+        container_name="deer-flow-sandbox-sandbox-2",
+    )
+    provider._thread_sandboxes["thread-2"] = "sandbox-2"
+    provider._last_activity["sandbox-2"] = 1.0
+    provider._backend.discover.return_value = None
+
+    def _raise_connection_error(*args, **kwargs):
+        raise requests.exceptions.ConnectionError("Connection refused")
+
+    monkeypatch.setattr(requests, "get", _raise_connection_error)
+
+    result = provider.get("sandbox-2")
+
+    assert result is None
+    assert "sandbox-2" not in provider._sandboxes
+    assert "sandbox-2" not in provider._sandbox_infos
+    assert "sandbox-2" not in provider._last_activity
