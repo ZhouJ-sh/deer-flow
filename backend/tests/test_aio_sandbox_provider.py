@@ -181,6 +181,7 @@ def test_get_rediscovers_stale_cached_sandbox(tmp_path, monkeypatch):
     assert refreshed is not stale
     assert refreshed.base_url == "http://fresh-host:9090"
     assert provider._sandbox_infos["sandbox-1"].sandbox_url == "http://fresh-host:9090"
+    assert provider._thread_sandboxes["thread-1"] == "sandbox-1"
 
 
 def test_get_throttles_repeated_health_checks_for_healthy_sandbox(tmp_path, monkeypatch):

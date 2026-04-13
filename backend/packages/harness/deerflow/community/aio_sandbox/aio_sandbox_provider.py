@@ -668,6 +668,8 @@ class AioSandboxProvider(SandboxProvider):
             self._sandbox_infos[discovered.sandbox_id] = discovered
             self._last_activity[discovered.sandbox_id] = time.time()
             self._health_check_cache[discovered.sandbox_id] = (time.time(), True, discovered.sandbox_url)
+            for tid in thread_ids_to_remove:
+                self._thread_sandboxes[tid] = discovered.sandbox_id
 
         logger.info(f"Recovered sandbox {sandbox_id} at {discovered.sandbox_url}")
         return sandbox
