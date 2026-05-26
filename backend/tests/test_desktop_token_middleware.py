@@ -75,6 +75,17 @@ def test_api_request_with_wrong_token_is_rejected(tmp_path: Path):
     assert response.status_code == 403
 
 
+def test_api_request_with_non_ascii_token_is_rejected(tmp_path: Path):
+    token_file = tmp_path / "desktop-token"
+    token_file.write_text("secret-token\n", encoding="utf-8")
+    token_file.chmod(0o600)
+    client = TestClient(_app(token_file))
+
+    response = client.get("/api/models", headers=[(b"X-DeerFlow-Desktop-Token", "é".encode())])
+
+    assert response.status_code == 403
+
+
 def test_api_request_with_matching_token_is_allowed(tmp_path: Path):
     token_file = tmp_path / "desktop-token"
     token_file.write_text("secret-token\n", encoding="utf-8")
@@ -169,3 +180,47 @@ def test_world_readable_token_file_fails_closed_on_posix(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="permissions"):
         client.get("/health")
+
+
+def test_create_app_has_no_desktop_guard_by_default(monkeypatch: pytest.MonkeyPatch):
+    from app.gateway.app import create_app
+
+    monkeypatch.delenv("DEER_FLOW_DESKTOP", raising=False)
+    monkeypatch.delenv("DEER_FLOW_DESKTOP_TOKEN_FILE", raising=False)
+    client = TestClient(create_app())
+
+    assert client.get("/health").status_code == 200
+
+
+def test_create_app_desktop_mode_missing_token_file_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from app.gateway.app import create_app
+
+    monkeypatch.setenv("DEER_FLOW_DESKTOP", "1")
+    monkeypatch.setenv("DEER_FLOW_DESKTOP_TOKEN_FILE", str(tmp_path / "missing-token"))
+    client = TestClient(create_app())
+
+    with pytest.raises(RuntimeError, match="Desktop token file"):
+        client.get("/health")
+
+
+def test_create_app_desktop_mode_requires_token_before_public_auth(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from app.gateway.app import create_app
+
+    token_file = tmp_path / "desktop-token"
+    token_file.write_text("secret-token\n", encoding="utf-8")
+    token_file.chmod(0o600)
+    monkeypatch.setenv("DEER_FLOW_DESKTOP", "1")
+    monkeypatch.setenv("DEER_FLOW_DESKTOP_TOKEN_FILE", str(token_file))
+    client = TestClient(create_app())
+
+    assert client.get("/health").status_code == 200
+    response = client.post("/api/v1/auth/initialize")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Desktop token required"

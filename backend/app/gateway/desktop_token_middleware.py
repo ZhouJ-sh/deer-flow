@@ -30,10 +30,13 @@ class DesktopTokenMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         supplied = request.headers.get(DESKTOP_TOKEN_HEADER, "")
-        if not supplied or not secrets.compare_digest(self.expected_token, supplied):
+        if not supplied or not self._token_matches(supplied):
             return JSONResponse(status_code=403, content={"detail": "Desktop token required"})
 
         return await call_next(request)
+
+    def _token_matches(self, supplied: str) -> bool:
+        return secrets.compare_digest(self.expected_token.encode(), supplied.encode())
 
     @staticmethod
     def _is_exempt(request: Request) -> bool:
