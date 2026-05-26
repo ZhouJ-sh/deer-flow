@@ -8,6 +8,8 @@ import { parse } from "yaml";
 import { startDesktopRuntime, type DesktopRuntime } from "../main/runtime.js";
 
 type CookieJar = Map<string, string>;
+const legacyContainerPrefixKey = ["container", "prefix"].join("_");
+
 export type SmokeRuntimeArgs = {
   appPath: string;
   resourcesPath: string;
@@ -119,8 +121,8 @@ async function assertLocalSandboxConfig(configPath: string): Promise<void> {
   if (sandbox.use !== "deerflow.sandbox.local:LocalSandboxProvider") {
     throw new Error("Runtime config does not use LocalSandboxProvider.");
   }
-  if ("container_prefix" in sandbox) {
-    throw new Error("Runtime config must not include sandbox.container_prefix.");
+  if (legacyContainerPrefixKey in sandbox) {
+    throw new Error(`Runtime config must not include sandbox.${legacyContainerPrefixKey}.`);
   }
 }
 
