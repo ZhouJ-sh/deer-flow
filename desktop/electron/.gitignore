@@ -2,4 +2,6 @@ node_modules/
 dist/
 resources/
 release/
+test-results/
+playwright-report/
 *.log
