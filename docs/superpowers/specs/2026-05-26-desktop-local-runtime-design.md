@@ -87,25 +87,28 @@ Desktop startup:
 1. Electron main process resolves the OS app-data directory:
    - macOS: `~/Library/Application Support/DeerFlow/`
    - Windows: `%APPDATA%/DeerFlow/`
+   - This document calls that resolved directory `<desktop-data>`.
 2. It ensures these local files/directories exist:
    - `config.yaml`
    - `extensions_config.json`
    - `.env`
    - `.deer-flow/`
    - `logs/`
-3. It allocates loopback ports for Gateway and frontend.
+3. It allocates loopback ports for Gateway, Next standalone, and the desktop frontend proxy.
 4. It starts Gateway as a local sidecar:
    - Host: `127.0.0.1`
    - Dynamic port chosen by Electron
+   - Working directory: `<desktop-data>/`, not the bundled backend resource directory
    - App env:
-     - `DEER_FLOW_HOME=<app-data>/.deer-flow`
-     - `DEER_FLOW_CONFIG_PATH=<app-data>/config.yaml`
-     - `DEER_FLOW_EXTENSIONS_CONFIG_PATH=<app-data>/extensions_config.json`
+     - `DEER_FLOW_HOME=<desktop-data>/.deer-flow`
+     - `DEER_FLOW_CONFIG_PATH=<desktop-data>/config.yaml`
+     - `DEER_FLOW_EXTENSIONS_CONFIG_PATH=<desktop-data>/extensions_config.json`
+     - `DEER_FLOW_PROJECT_ROOT=<desktop-data>/`
      - `GATEWAY_CORS_ORIGINS=<desktop frontend origin>`
      - `DEER_FLOW_DESKTOP=1`
 5. It starts or serves the frontend:
    - Developer shell: point to `next dev` or an externally running dev URL.
-   - Packaged customer runtime: run the packaged Next standalone server.
+   - Packaged customer runtime: run the packaged Next standalone server on an internal loopback port, then run a desktop HTTP proxy as the browser-facing origin.
 6. It opens a BrowserWindow to the local frontend URL.
 7. On app quit, it terminates child processes and best-effort cleans up sandbox containers whose configured desktop container prefix matches this app install.
 
@@ -160,11 +163,14 @@ Packaged startup requirements:
 
 - Build frontend with `NEXT_CONFIG_BUILD_OUTPUT=standalone`.
 - Bundle a Node runtime compatible with the built Next server.
-- Start `.next/standalone/server.js` on `127.0.0.1:<frontend-port>`.
+- Start `.next/standalone/server.js` on `127.0.0.1:<next-port>` as an internal server.
+- Start a desktop-only HTTP proxy on `127.0.0.1:<frontend-port>` as the BrowserWindow origin.
+- The desktop proxy forwards page/static requests to the internal Next server and forwards all `/api/*` and `/api/langgraph/*` requests to Gateway.
 - Set `DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://127.0.0.1:<gateway-port>` before starting the frontend server.
 - Persist or generate `BETTER_AUTH_SECRET` under the desktop app-data directory.
 - Do not set `NEXT_PUBLIC_LANGGRAPH_BASE_URL` or `NEXT_PUBLIC_BACKEND_BASE_URL` for the packaged MVP; client code should keep using the current same-origin defaults.
-- Configure Gateway CORS/CSRF origins to the chosen frontend origin.
+- Configure Gateway CORS/CSRF origins to the desktop proxy origin.
+- The desktop proxy, not `next.config.js` rewrites alone, injects the desktop token into proxied Gateway requests.
 
 ### 4.5 Sandbox Strategy
 
@@ -232,9 +238,10 @@ Required controls before any packaged customer runtime:
 
 - Gateway binds to `127.0.0.1`, not `0.0.0.0`.
 - Electron generates a per-install desktop local access token and stores it in the desktop app-data directory with user-only filesystem permissions where the OS supports them.
-- The packaged Next frontend is the only browser-facing origin. It proxies Gateway requests through its existing rewrites.
-- The Next server, not renderer JavaScript, attaches `X-DeerFlow-Desktop-Token` when proxying to Gateway.
-- Gateway verifies `X-DeerFlow-Desktop-Token` only when `DEER_FLOW_DESKTOP=1`; requests missing or failing the token are rejected before normal auth processing.
+- The packaged Next frontend proxy is the only browser-facing origin. A desktop-only proxy forwards all `/api/*` and `/api/langgraph/*` requests to Gateway.
+- The desktop proxy, not renderer JavaScript, attaches `X-DeerFlow-Desktop-Token` when proxying to Gateway.
+- Gateway verifies `X-DeerFlow-Desktop-Token` only when `DEER_FLOW_DESKTOP=1`; API requests missing or failing the token are rejected before normal CSRF/auth processing.
+- The only Gateway paths exempt from the desktop token are `OPTIONS` preflight and `/health`. Setup, login, register, logout, and initialize endpoints still require the desktop token because they create or mutate local auth state.
 - Renderer JavaScript never receives the desktop token, and the token is never stored in localStorage.
 - CORS and CSRF settings allow only the desktop frontend origin.
 - The BrowserWindow uses conservative settings:
@@ -259,7 +266,7 @@ Desktop mode keeps DeerFlow's existing user auth/setup flow. The desktop local a
 Request order in packaged customer runtime:
 
 1. CORS handles browser origin preflight for the local frontend origin.
-2. Desktop token guard rejects non-public Gateway requests without the correct `X-DeerFlow-Desktop-Token` when `DEER_FLOW_DESKTOP=1`.
+2. Desktop token guard rejects Gateway API requests without the correct `X-DeerFlow-Desktop-Token` when `DEER_FLOW_DESKTOP=1`; only `OPTIONS` and `/health` are exempt.
 3. Existing `CSRFMiddleware` validates state-changing browser requests with the normal `csrf_token` double-submit flow.
 4. Existing `AuthMiddleware` validates the normal `access_token` cookie or internal auth token and stamps `request.state.user`.
 5. Existing route-level authorization and user isolation continue to operate unchanged.
@@ -271,13 +278,16 @@ First-run setup remains the existing `/setup` / `/api/v1/auth/initialize` flow. 
 Desktop data should be isolated from the source checkout:
 
 ```text
-<app-data>/DeerFlow/
+<desktop-data>/
   config.yaml
   extensions_config.json
   .env
   desktop-token
   better-auth-secret
   .deer-flow/
+    .jwt_secret
+    data/
+      deerflow.db
     memory.json
     users/
       <desktop-admin-user-id>/
@@ -297,6 +307,15 @@ Desktop data should be isolated from the source checkout:
 Config creation:
 
 - First run copies from `config.example.yaml` and `extensions_config.example.json` when present.
+- Electron parses `<desktop-data>/.env` itself and injects those values into the Gateway and frontend server environments. Desktop packaged mode must not rely on `load_dotenv()` discovering the app-data `.env` from whatever CWD the child process happens to use.
+- Electron persists `BETTER_AUTH_SECRET` for the frontend and preserves Gateway's `AUTH_JWT_SECRET` either by writing it to `<desktop-data>/.env` or by allowing the existing Gateway fallback to persist `<desktop-data>/.deer-flow/.jwt_secret` via `DEER_FLOW_HOME`.
+- Gateway packaged-mode CWD is `<desktop-data>/`; desktop config must also write absolute storage paths so future CWD changes cannot leak state into the bundled resources or source checkout.
+- Desktop-generated `config.yaml` must set:
+  - `database.backend: sqlite`
+  - `database.sqlite_dir: <desktop-data>/.deer-flow/data`
+  - `run_events.backend: db`
+  - `checkpointer: null` or omit the legacy `checkpointer` section so unified `database` owns LangGraph state too
+  - `sandbox.container_prefix: deer-flow-desktop-<install-id>` when using `AioSandboxProvider`
 - A desktop setup screen or launch diagnostic should guide missing model API keys.
 - Existing `config_version` and `make config-upgrade` logic should be reused where practical, but desktop startup should not require Make.
 
@@ -312,7 +331,7 @@ Config creation:
 
 ### Packaged MVP
 
-The packaged MVP should use a prebuilt per-platform runtime/source layout, not first-launch dependency installation and not PyInstaller.
+The packaged MVP should use a prebuilt per-platform runtime/source layout, not first-launch dependency installation and not PyInstaller. Runtime artifacts must be relocatable across installation paths, including paths with spaces.
 
 Artifact layout:
 
@@ -323,20 +342,28 @@ resources/
     packages/
     pyproject.toml
     uv.lock
-    .venv/                 # built on the target platform/arch in CI
+    site-packages/          # wheel-installed pure/Python extension deps for the target platform/arch
   frontend/
     .next/standalone/
     .next/static/
     public/
   runtimes/
     node/
-    python/                # if not relying on the venv's interpreter path
+    python/
+  desktop-server/
+    proxy.js               # Browser-facing HTTP proxy + API header injection
 ```
 
 Packaging rules:
 
 - Build separate artifacts for macOS arm64, macOS x64, Windows x64, and Windows arm64 only if product requires it.
-- Create the Python environment at build time with `uv sync --frozen --all-packages` and any required extras; do not run `uv sync` on the customer's machine for the MVP.
+- Resolve and install Python dependencies at build time from the checked-in lockfile and any required extras; do not run `uv sync` on the customer's machine for the MVP.
+- Do not copy a regular `.venv` into the app bundle as the launch mechanism. Virtual environments often bake absolute interpreter paths. Instead, launch the bundled Python interpreter with explicit `PYTHONPATH` entries for `resources/backend`, `resources/backend/packages/harness`, and the packaged dependency directory, or use a relocatable virtualenv format that is proven by install-path smoke tests.
+- Gateway launch command:
+  - macOS: `<resources>/runtimes/python/bin/python -m uvicorn app.gateway.app:app --host 127.0.0.1 --port <gateway-port>`
+  - Windows: `<resources>\\runtimes\\python\\python.exe -m uvicorn app.gateway.app:app --host 127.0.0.1 --port <gateway-port>`
+  - `cwd=<desktop-data>/`
+  - `PYTHONPATH=<resources>/backend;<resources>/backend/packages/harness;<resources>/backend/site-packages` using the platform path separator
 - Include certificates needed by Python HTTP clients or ensure the bundled Python uses the OS trust store consistently.
 - Preserve DeerFlow source layout and dynamic imports so LangChain providers, MCP configuration, and `resolve_class()` continue to work.
 - Do not use PyInstaller in the MVP. It remains a later optimization after dynamic-provider compatibility is proven.
@@ -351,6 +378,7 @@ Core regression tests:
 - Backend tests continue to run unchanged.
 - Add focused tests only for any desktop-mode Gateway hook:
   - desktop token accepted/rejected
+  - setup/login/register endpoints rejected without the desktop token in desktop mode
   - CORS/CSRF behavior in desktop mode
   - Gateway host/port config if changed
 
@@ -361,13 +389,16 @@ Desktop integration tests:
 - Frontend can load and fetch `/api/models`.
 - LangGraph stream endpoint can start a mock/minimal run when config is valid.
 - Quit cleans child processes.
-- Desktop token is attached by the Next proxy and rejected when missing or incorrect.
+- Desktop token is attached by the desktop HTTP proxy and rejected when missing or incorrect.
 - Existing setup/login flow still creates an admin user and stamps user-scoped thread data.
+- `deerflow.db`, users, runs, run events, feedback, memory, and thread sandbox data all land under `<desktop-data>/.deer-flow`, not under the bundled resource directory or repo checkout.
+- App-data `.env`, `BETTER_AUTH_SECRET`, and Gateway JWT secret survive app restart and app update.
 - Port collision after allocation is handled by retrying or showing a clear launch error.
 - Stale Gateway/frontend child processes from a crashed prior launch are detected and handled without killing unrelated processes.
 - Corrupted `config.yaml` produces a recoverable diagnostic instead of a blank window.
 - Missing model API keys send the user to setup/config diagnostics, not a generic sidecar failure.
 - Windows paths with spaces work for app-data, backend resources, frontend resources, and sandbox mounts.
+- Packaged runtime launches successfully from installed paths containing spaces on macOS and Windows.
 - Missing Docker/Apple Container is reported as a sandbox-mode setup issue; local sandbox mode is not blocked by it.
 - Desktop app update migrates or preserves `config.yaml`, `extensions_config.json`, `desktop-token`, `better-auth-secret`, and `.deer-flow`.
 
