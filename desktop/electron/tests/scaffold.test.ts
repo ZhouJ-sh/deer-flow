@@ -62,11 +62,14 @@ describe("desktop scaffold", () => {
     expect(preloadConfig?.entry).not.toHaveProperty("main/index");
   });
 
-  test("does not reference generated resources before they exist", async () => {
+  test("packages generated runtime resources after staging support exists", async () => {
     const builderConfig = await import("node:fs/promises").then(({ readFile }) =>
       readFile(new URL("../electron-builder.yml", import.meta.url), "utf8"),
     );
 
-    expect(builderConfig).not.toContain("extraResources:");
+    expect(builderConfig).toContain("extraResources:");
+    expect(builderConfig).toContain("from: resources");
+    expect(builderConfig).toContain("to: .");
+    expect(builderConfig).toContain('"**/*"');
   });
 });

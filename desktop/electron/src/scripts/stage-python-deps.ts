@@ -1,11 +1,29 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 
-export async function stagePythonDeps(repoRoot: string, outDir: string): Promise<void> {
-  const root = resolve(repoRoot);
+const usage = "Usage: node dist/scripts/stage-python-deps.js <backend-dir> <out-site-packages-dir>";
+
+export type StagePythonDepsArgs = {
+  backendDir: string;
+  outDir: string;
+};
+
+export function parseStagePythonDepsArgs(args: string[] = process.argv.slice(2)): StagePythonDepsArgs {
+  const [backendDirArg, outDirArg] = args;
+  if (!outDirArg) {
+    throw new Error(usage);
+  }
+
+  return {
+    backendDir: resolve(backendDirArg ?? join(process.cwd(), "..", "..", "backend")),
+    outDir: resolve(outDirArg),
+  };
+}
+
+export async function stagePythonDeps(backendDir: string, outDir: string): Promise<void> {
+  const backend = resolve(backendDir);
   const output = resolve(outDir);
   const tempDir = await mkdtemp(join(tmpdir(), "deer-flow-python-deps-"));
   const requirementsPath = join(tempDir, "requirements.txt");
@@ -15,7 +33,7 @@ export async function stagePythonDeps(repoRoot: string, outDir: string): Promise
     await run("uv", [
       "export",
       "--project",
-      join(root, "backend"),
+      backend,
       "--format",
       "requirements-txt",
       "--no-hashes",
@@ -58,15 +76,9 @@ async function run(command: string, args: string[]): Promise<void> {
 }
 
 async function main() {
-  const [outDirArg, repoRootArg] = process.argv.slice(2);
-  if (!outDirArg) {
-    throw new Error("Usage: node dist/scripts/stage-python-deps.js <out-dir> [repo-root]");
-  }
-
-  const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = repoRootArg ? resolve(repoRootArg) : resolve(scriptDir, "..", "..", "..", "..");
-  await stagePythonDeps(repoRoot, outDirArg);
-  console.log(`Python dependencies staged at ${resolve(outDirArg)}`);
+  const { backendDir, outDir } = parseStagePythonDepsArgs();
+  await stagePythonDeps(backendDir, outDir);
+  console.log(`Python dependencies staged at ${outDir}`);
 }
 
 if (process.argv[1]?.endsWith("stage-python-deps.js")) {

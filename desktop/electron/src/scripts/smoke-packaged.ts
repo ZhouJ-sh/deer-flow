@@ -22,8 +22,8 @@ export async function smokePackaged(resourcesPath: string): Promise<void> {
     join(layout.frontend, ".next", "standalone", "public"),
     join(layout.desktopServer, "proxy"),
     join(layout.desktopServer, "next"),
-    layout.nodeRuntime,
-    layout.pythonRuntime,
+    runtimeExecutablePath(layout.nodeRuntime, "node"),
+    runtimeExecutablePath(layout.pythonRuntime, "python"),
   ];
 
   const missing: string[] = [];
@@ -38,6 +38,14 @@ export async function smokePackaged(resourcesPath: string): Promise<void> {
   }
 
   console.log("Packaged runtime layout smoke passed");
+}
+
+function runtimeExecutablePath(runtimeRoot: string, name: "node" | "python"): string {
+  if (process.platform === "win32") {
+    return join(runtimeRoot, `${name}.exe`);
+  }
+
+  return join(runtimeRoot, "bin", name);
 }
 
 async function exists(path: string): Promise<boolean> {
