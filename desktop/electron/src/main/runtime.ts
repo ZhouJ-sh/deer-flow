@@ -279,8 +279,7 @@ export async function startDesktopRuntime(
       },
     };
   } catch (error) {
-    await stopRuntime(proxy, next, gateway);
-    throw error;
+    throw await cleanupAfterStartupFailure(error, proxy, next, gateway);
   }
 }
 
@@ -374,6 +373,21 @@ export async function stopRuntime(
 
   if (errors.length > 0) {
     throw new AggregateError(errors, "runtime cleanup failed");
+  }
+}
+
+export async function cleanupAfterStartupFailure(
+  startupError: unknown,
+  proxy: RuntimeProxyPart | null,
+  next: RuntimePart | null,
+  gateway: RuntimePart | null,
+  cleanupTimeoutMs = CLEANUP_TIMEOUT_MS,
+): Promise<unknown> {
+  try {
+    await stopRuntime(proxy, next, gateway, cleanupTimeoutMs);
+    return startupError;
+  } catch (cleanupError) {
+    return new AggregateError([startupError, cleanupError], "desktop runtime startup failed during cleanup");
   }
 }
 

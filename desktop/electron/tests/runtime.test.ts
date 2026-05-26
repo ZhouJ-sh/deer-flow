@@ -6,6 +6,7 @@ import {
   buildGatewayCommand,
   buildNextCommand,
   classifyReadinessFailure,
+  cleanupAfterStartupFailure,
   stopRuntime,
 } from "../src/main/runtime.js";
 import { resolveDesktopResources } from "../src/main/paths.js";
@@ -232,5 +233,21 @@ describe("runtime shutdown", () => {
     await expect(stopRuntime(proxy, next, gateway, 5)).rejects.toThrow("runtime cleanup failed");
 
     expect(calls).toEqual(["proxy", "next", "gateway"]);
+  });
+
+  test("preserves startup failure details when cleanup also fails", async () => {
+    const startupError = new Error("Gateway failed to import");
+    const proxy = {
+      close: async () => {
+        throw new Error("proxy close failed");
+      },
+    };
+
+    const error = await cleanupAfterStartupFailure(startupError, proxy, null, null);
+
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).message).toBe("desktop runtime startup failed during cleanup");
+    expect((error as AggregateError).errors[0]).toBe(startupError);
+    expect((error as AggregateError).errors[1]).toBeInstanceOf(AggregateError);
   });
 });
