@@ -104,6 +104,7 @@ Desktop startup:
      - `DEER_FLOW_CONFIG_PATH=<desktop-data>/config.yaml`
      - `DEER_FLOW_EXTENSIONS_CONFIG_PATH=<desktop-data>/extensions_config.json`
      - `DEER_FLOW_PROJECT_ROOT=<desktop-data>/`
+     - `DEER_FLOW_DESKTOP_TOKEN_FILE=<desktop-data>/desktop-token`
      - `GATEWAY_CORS_ORIGINS=<desktop frontend origin>`
      - `DEER_FLOW_DESKTOP=1`
 5. It starts or serves the frontend:
@@ -166,11 +167,12 @@ Packaged startup requirements:
 - Start `.next/standalone/server.js` on `127.0.0.1:<next-port>` as an internal server.
 - Start a desktop-only HTTP proxy on `127.0.0.1:<frontend-port>` as the BrowserWindow origin.
 - The desktop proxy forwards page/static requests to the internal Next server and forwards all `/api/*` and `/api/langgraph/*` requests to Gateway.
-- Set `DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://127.0.0.1:<gateway-port>` before starting the frontend server.
+- Set `DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://127.0.0.1:<frontend-port>/_desktop-gateway` before starting the Next server, so SSR auth/setup calls go through the same desktop proxy path that injects the desktop token.
 - Persist or generate `BETTER_AUTH_SECRET` under the desktop app-data directory.
 - Do not set `NEXT_PUBLIC_LANGGRAPH_BASE_URL` or `NEXT_PUBLIC_BACKEND_BASE_URL` for the packaged MVP; client code should keep using the current same-origin defaults.
 - Configure Gateway CORS/CSRF origins to the desktop proxy origin.
 - The desktop proxy, not `next.config.js` rewrites alone, injects the desktop token into proxied Gateway requests.
+- The proxy exposes `/_desktop-gateway/*` for local Next SSR server-side fetches only. Browser navigations or XHR/fetch requests to that prefix are rejected using request metadata such as `Origin`, `Sec-Fetch-*`, or an internal header set only by the Next server wrapper.
 
 ### 4.5 Sandbox Strategy
 
@@ -238,6 +240,8 @@ Required controls before any packaged customer runtime:
 
 - Gateway binds to `127.0.0.1`, not `0.0.0.0`.
 - Electron generates a per-install desktop local access token and stores it in the desktop app-data directory with user-only filesystem permissions where the OS supports them.
+- Electron passes `DEER_FLOW_DESKTOP_TOKEN_FILE=<desktop-data>/desktop-token` to both Gateway and the desktop HTTP proxy. Gateway reads the expected token from that file; the proxy reads the same file to inject the request header.
+- Startup fails closed if the desktop token file is missing, empty, unreadable, world-readable on platforms where permissions can be checked, or different between Gateway/proxy reads. Token rotation is an explicit logout/reset operation that restarts both sidecars after writing the new file.
 - The packaged Next frontend proxy is the only browser-facing origin. A desktop-only proxy forwards all `/api/*` and `/api/langgraph/*` requests to Gateway.
 - The desktop proxy, not renderer JavaScript, attaches `X-DeerFlow-Desktop-Token` when proxying to Gateway.
 - Gateway verifies `X-DeerFlow-Desktop-Token` only when `DEER_FLOW_DESKTOP=1`; API requests missing or failing the token are rejected before normal CSRF/auth processing.
