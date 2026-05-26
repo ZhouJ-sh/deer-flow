@@ -1,21 +1,43 @@
-import { app, BrowserWindow } from "electron";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { app } from "electron";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import { startDesktopRuntime, type DesktopRuntime } from "./runtime.js";
+import { createDesktopWindow } from "./window.js";
 
 async function main() {
   await app.whenReady();
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 840,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: join(__dirname, "..", "preload", "index.js"),
-    },
+
+  const smokeUrl = process.env.DEER_FLOW_DESKTOP_SMOKE_URL;
+  if (smokeUrl) {
+    await createDesktopWindow(smokeUrl);
+    return;
+  }
+
+  const runtime = await startDesktopRuntime({
+    appDataRoot: app.getPath("userData"),
+    packaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
   });
-  await win.loadURL("about:blank");
+  registerRuntimeShutdown(runtime);
+
+  await createDesktopWindow(runtime.proxyOrigin);
 }
 
-void main();
+function registerRuntimeShutdown(runtime: DesktopRuntime) {
+  let stopping = false;
+
+  app.on("before-quit", (event) => {
+    if (stopping) {
+      return;
+    }
+
+    event.preventDefault();
+    stopping = true;
+    void runtime.stop().finally(() => app.quit());
+  });
+}
+
+main().catch((error) => {
+  console.error(error);
+  app.exit(1);
+});

@@ -17,13 +17,13 @@ describe("desktop scaffold", () => {
     expect(pkg.default.scripts.dist).toBe("pnpm build && electron-builder");
   });
 
-  test("loads the bundled preload entrypoint from the main process", async () => {
-    const main = await import("node:fs/promises").then(({ readFile }) =>
-      readFile(new URL("../src/main/index.ts", import.meta.url), "utf8"),
+  test("loads the bundled preload entrypoint from the desktop window", async () => {
+    const window = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(new URL("../src/main/window.ts", import.meta.url), "utf8"),
     );
 
-    expect(main).toContain("preload:");
-    expect(main).toContain('join(__dirname, "..", "preload", "index.js")');
+    expect(window).toContain("preload:");
+    expect(window).toContain('join(__dirname, "..", "preload", "index.js")');
   });
 
   test("emits main as ESM and preload as CommonJS", async () => {
@@ -40,7 +40,10 @@ describe("desktop scaffold", () => {
     const preloadConfig = configs.find((config) => config.entry?.["preload/index"]);
 
     expect(mainConfig).toMatchObject({
-      entry: { "main/index": "src/main/index.ts" },
+      entry: {
+        "main/index": "src/main/index.ts",
+        "next/register-fetch": "src/next/register-fetch.ts",
+      },
       format: ["esm"],
       outDir: "dist",
     });
