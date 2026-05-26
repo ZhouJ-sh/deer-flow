@@ -10,6 +10,7 @@
     "dev": "pnpm build && electron .",
     "pack": "pnpm build && electron-builder --dir",
     "dist": "pnpm build && electron-builder",
+    "smoke": "node dist/scripts/smoke-packaged.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

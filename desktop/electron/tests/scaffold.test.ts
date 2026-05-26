@@ -6,9 +6,9 @@ describe("desktop scaffold", () => {
     expect(pkg.default.name).toBe("@deer-flow/desktop-electron");
   });
 
-  test("does not expose a smoke script before smoke packaging exists", async () => {
+  test("exposes packaged layout smoke script after smoke packaging exists", async () => {
     const pkg = await import("../package.json", { assert: { type: "json" } });
-    expect(pkg.default.scripts).not.toHaveProperty("smoke");
+    expect(pkg.default.scripts.smoke).toBe("node dist/scripts/smoke-packaged.js");
   });
 
   test("builds before packaging from a clean output directory", async () => {
@@ -43,6 +43,11 @@ describe("desktop scaffold", () => {
       entry: {
         "main/index": "src/main/index.ts",
         "next/register-fetch": "src/next/register-fetch.ts",
+        "proxy/desktop-proxy": "src/proxy/desktop-proxy.ts",
+        "scripts/build-runtime": "src/scripts/build-runtime.ts",
+        "scripts/smoke-packaged": "src/scripts/smoke-packaged.ts",
+        "scripts/smoke-runtime": "src/scripts/smoke-runtime.ts",
+        "scripts/stage-python-deps": "src/scripts/stage-python-deps.ts",
       },
       format: ["esm"],
       outDir: "dist",
