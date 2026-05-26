@@ -1,5 +1,6 @@
 import { createWriteStream } from "node:fs";
 import { ChildProcess, spawn } from "node:child_process";
+import type { WriteStream } from "node:fs";
 
 export interface StartSidecarOptions {
   name: string;
@@ -21,6 +22,7 @@ const STOP_TIMEOUT_MS = 5_000;
 
 export function startSidecar(options: StartSidecarOptions): SidecarProcess {
   const log = createWriteStream(options.logPath, { flags: "a" });
+  const logLifecycle = trackLogLifecycle(log);
   const child = spawn(options.command, options.args, {
     cwd: options.cwd,
     env: options.env,
@@ -31,30 +33,35 @@ export function startSidecar(options: StartSidecarOptions): SidecarProcess {
   child.stdout?.pipe(log, { end: false });
   child.stderr?.pipe(log, { end: false });
 
-  let exited = false;
-  const exit = new Promise<number | null>((resolve, reject) => {
+  let closed = false;
+  let spawnError: Error | null = null;
+  const childClosed = new Promise<number | null>((resolve) => {
     child.once("error", (error) => {
-      exited = true;
-      log.end();
-      reject(error);
+      spawnError = error;
     });
 
-    child.once("exit", (code) => {
-      exited = true;
-      log.end();
+    child.once("close", (code) => {
+      closed = true;
       resolve(code);
     });
   });
 
+  const exit = (async () => {
+    const code = await childClosed;
+    await logLifecycle.end();
+    if (spawnError) {
+      throw spawnError;
+    }
+    if (logLifecycle.error) {
+      throw logLifecycle.error;
+    }
+    return code;
+  })();
+
   const stop = async () => {
-    if (exited || child.exitCode !== null || child.signalCode !== null) {
+    if (closed || child.exitCode !== null || child.signalCode !== null) {
       return;
     }
-
-    const settled = new Promise<void>((resolve) => {
-      child.once("exit", () => resolve());
-      child.once("error", () => resolve());
-    });
 
     child.kill(process.platform === "win32" ? undefined : "SIGTERM");
 
@@ -62,9 +69,9 @@ export function startSidecar(options: StartSidecarOptions): SidecarProcess {
       setTimeout(() => resolve("timeout"), STOP_TIMEOUT_MS).unref();
     });
 
-    if ((await Promise.race([settled, timeout])) === "timeout" && !exited) {
+    if ((await Promise.race([childClosed, timeout])) === "timeout" && !closed) {
       child.kill("SIGKILL");
-      await settled;
+      await childClosed;
     }
   };
 
@@ -73,5 +80,34 @@ export function startSidecar(options: StartSidecarOptions): SidecarProcess {
     child,
     exit,
     stop,
+  };
+}
+
+function trackLogLifecycle(log: WriteStream) {
+  let error: Error | null = null;
+  let complete = false;
+  const done = new Promise<void>((resolve) => {
+    const markComplete = () => {
+      complete = true;
+      resolve();
+    };
+    log.once("finish", markComplete);
+    log.once("close", markComplete);
+  });
+
+  log.once("error", (err) => {
+    error = err;
+  });
+
+  return {
+    get error() {
+      return error;
+    },
+    async end() {
+      if (!complete && !log.destroyed && !log.writableEnded) {
+        log.end();
+      }
+      await done;
+    },
   };
 }

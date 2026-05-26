@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,14 +7,22 @@ import { afterEach, describe, expect, test } from "vitest";
 import { startSidecar } from "../src/main/sidecar.js";
 
 const originalEnv = { ...process.env };
+let created: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   process.env = { ...originalEnv };
+  await Promise.all(created.map((dir) => rm(dir, { recursive: true, force: true })));
+  created = [];
 });
 
 async function tempLogPath(name: string) {
+  return join(await tempDir(), name);
+}
+
+async function tempDir() {
   const dir = await mkdtemp(join(tmpdir(), "deer-flow-sidecar-"));
-  return join(dir, name);
+  created.push(dir);
+  return dir;
 }
 
 describe("startSidecar", () => {
@@ -40,6 +48,20 @@ describe("startSidecar", () => {
       name: "missing-command",
       command: "definitely-not-a-real-deer-flow-command",
       args: [],
+      cwd: process.cwd(),
+      env: {},
+      logPath,
+    });
+
+    await expect(sidecar.exit).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("surfaces log file errors through the exit promise", async () => {
+    const logPath = join(await tempDir(), "missing", "output.log");
+    const sidecar = startSidecar({
+      name: "bad-log",
+      command: process.execPath,
+      args: ["-e", "console.log('cannot be logged')"],
       cwd: process.cwd(),
       env: {},
       logPath,
