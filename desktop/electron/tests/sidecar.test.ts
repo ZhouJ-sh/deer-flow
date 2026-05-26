@@ -2,9 +2,15 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import { startSidecar } from "../src/main/sidecar.js";
+
+const originalEnv = { ...process.env };
+
+afterEach(() => {
+  process.env = { ...originalEnv };
+});
 
 async function tempLogPath(name: string) {
   const dir = await mkdtemp(join(tmpdir(), "deer-flow-sidecar-"));
@@ -40,6 +46,33 @@ describe("startSidecar", () => {
     });
 
     await expect(sidecar.exit).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("uses the provided environment without inheriting parent env vars", async () => {
+    process.env.DEER_FLOW_PARENT_ONLY = "should-not-leak";
+    const logPath = await tempLogPath("env.log");
+    const sidecar = startSidecar({
+      name: "env-writer",
+      command: process.execPath,
+      args: [
+        "-e",
+        [
+          "console.log(JSON.stringify({",
+          "provided: process.env.DEER_FLOW_PROVIDED_ONLY,",
+          "parent: process.env.DEER_FLOW_PARENT_ONLY ?? null",
+          "}));",
+        ].join(""),
+      ],
+      cwd: process.cwd(),
+      env: {
+        PATH: process.env.PATH,
+        DEER_FLOW_PROVIDED_ONLY: "kept",
+      },
+      logPath,
+    });
+
+    await expect(sidecar.exit).resolves.toBe(0);
+    await expect(readFile(logPath, "utf8")).resolves.toContain('{"provided":"kept","parent":null}');
   });
 
   test("stop terminates a running process and is a no-op after exit", async () => {

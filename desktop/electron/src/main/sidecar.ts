@@ -23,7 +23,7 @@ export function startSidecar(options: StartSidecarOptions): SidecarProcess {
   const log = createWriteStream(options.logPath, { flags: "a" });
   const child = spawn(options.command, options.args, {
     cwd: options.cwd,
-    env: { ...process.env, ...options.env },
+    env: options.env,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
