@@ -5,11 +5,6 @@ directories:
 files:
   - dist/**
   - package.json
-extraResources:
-  - from: resources
-    to: .
-    filter:
-      - "**/*"
 mac:
   target:
     - dmg

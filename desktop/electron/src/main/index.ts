@@ -1,4 +1,8 @@
 import { app, BrowserWindow } from "electron";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function main() {
   await app.whenReady();
@@ -8,6 +12,7 @@ async function main() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: join(__dirname, "..", "preload", "index.js"),
     },
   });
   await win.loadURL("about:blank");

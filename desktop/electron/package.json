@@ -11,8 +11,7 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "smoke": "node dist/scripts/smoke-packaged.js"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
