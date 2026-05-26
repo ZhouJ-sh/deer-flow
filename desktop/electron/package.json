@@ -20,5 +20,9 @@
     "tsup": "^8.5.1",
     "typescript": "^5.8.2",
     "vitest": "^4.1.4"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "yaml": "^2.9.0"
   }
 }
