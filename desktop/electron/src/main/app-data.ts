@@ -162,15 +162,25 @@ async function exists(path: string): Promise<boolean> {
 }
 
 async function chmodUserOnly(path: string): Promise<void> {
+  if (process.platform === "win32") {
+    await chmodUserOnlyBestEffort(path);
+    return;
+  }
+
+  const pathStat = await stat(path);
+  if (pathStat.isFile()) {
+    await chmod(path, userOnlyFileMode);
+  }
+}
+
+async function chmodUserOnlyBestEffort(path: string): Promise<void> {
   try {
     const pathStat = await stat(path);
     if (pathStat.isFile()) {
       await chmod(path, userOnlyFileMode);
     }
   } catch (error) {
-    if (!isNotFoundError(error)) {
-      return;
-    }
+    return;
   }
 }
 
