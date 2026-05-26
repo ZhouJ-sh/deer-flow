@@ -26,6 +26,34 @@ describe("desktop scaffold", () => {
     expect(main).toContain('join(__dirname, "..", "preload", "index.js")');
   });
 
+  test("emits main as ESM and preload as CommonJS", async () => {
+    const { default: tsupConfig } = await import("../tsup.config.js");
+
+    expect(Array.isArray(tsupConfig)).toBe(true);
+    const configs = tsupConfig as Array<{
+      entry?: Record<string, string>;
+      format?: string[];
+      outDir?: string;
+      outExtension?: () => { js?: string };
+    }>;
+    const mainConfig = configs.find((config) => config.entry?.["main/index"]);
+    const preloadConfig = configs.find((config) => config.entry?.["preload/index"]);
+
+    expect(mainConfig).toMatchObject({
+      entry: { "main/index": "src/main/index.ts" },
+      format: ["esm"],
+      outDir: "dist",
+    });
+    expect(mainConfig?.entry).not.toHaveProperty("preload/index");
+    expect(preloadConfig).toMatchObject({
+      entry: { "preload/index": "src/preload/index.ts" },
+      format: ["cjs"],
+      outDir: "dist",
+    });
+    expect(preloadConfig?.outExtension?.().js).toBe(".js");
+    expect(preloadConfig?.entry).not.toHaveProperty("main/index");
+  });
+
   test("does not reference generated resources before they exist", async () => {
     const builderConfig = await import("node:fs/promises").then(({ readFile }) =>
       readFile(new URL("../electron-builder.yml", import.meta.url), "utf8"),

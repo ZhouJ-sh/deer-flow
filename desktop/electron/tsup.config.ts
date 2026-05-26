@@ -1,16 +1,29 @@
-import { defineConfig } from "tsup";
+import { defineConfig, type Options } from "tsup";
 
-export default defineConfig({
-  entry: {
-    "main/index": "src/main/index.ts",
-    "preload/index": "src/preload/index.ts",
-  },
-  format: ["esm"],
+const sharedConfig = {
   platform: "node",
   target: "node20",
   outDir: "dist",
-  clean: true,
   splitting: false,
   sourcemap: true,
   external: ["electron"],
-});
+} satisfies Options;
+
+export default defineConfig([
+  {
+    ...sharedConfig,
+    entry: {
+      "main/index": "src/main/index.ts",
+    },
+    format: ["esm"],
+    clean: true,
+  },
+  {
+    ...sharedConfig,
+    entry: {
+      "preload/index": "src/preload/index.ts",
+    },
+    format: ["cjs"],
+    outExtension: () => ({ js: ".js" }),
+  },
+]);
