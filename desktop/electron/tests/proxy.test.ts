@@ -196,4 +196,17 @@ describe("startDesktopProxy", () => {
     expect(gateway!.requests).toHaveLength(0);
     await expect(readFile(logPath, "utf8")).resolves.toContain("Proxy error");
   });
+
+  test("returns 502 and logs an error when proxying to Gateway fails", async () => {
+    const logPath = join(await tempDir(), "proxy-error.log");
+    const closedGateway = await startRecordingServer();
+    await closedGateway.close();
+    const { proxy } = await startTestProxy({ gatewayOrigin: closedGateway.origin, logPath });
+
+    const response = await fetch(`${proxy.origin}/api/v1/projects`);
+
+    expect(response.status).toBe(502);
+    expect(await response.text()).not.toContain("desktop-secret-token");
+    await expect(readFile(logPath, "utf8")).resolves.toContain("Proxy error");
+  });
 });
