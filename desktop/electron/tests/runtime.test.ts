@@ -6,6 +6,7 @@ import {
   buildGatewayCommand,
   buildNextCommand,
   classifyReadinessFailure,
+  stopRuntime,
 } from "../src/main/runtime.js";
 import { resolveDesktopResources } from "../src/main/paths.js";
 
@@ -38,6 +39,35 @@ describe("runtime command builders", () => {
     expect(command.env.GATEWAY_PORT).toBe("4321");
     expect(command.env.PYTHONPATH).toContain(backendDir);
     expect(command.env.PYTHONPATH).toContain(join(backendDir, "packages", "harness"));
+  });
+
+  test("builds a packaged gateway command with packaged Python paths", () => {
+    const backendDir = resolve("/resources/backend");
+    const dataRoot = resolve("/user/data");
+
+    const command = buildGatewayCommand({
+      packaged: true,
+      backendDir,
+      pythonBin: "/resources/runtimes/python/bin/python",
+      port: 4322,
+      dataRoot,
+    });
+
+    expect(command.command).toBe("/resources/runtimes/python/bin/python");
+    expect(command.cwd).toBe(dataRoot);
+    expect(command.args).toEqual([
+      "-m",
+      "uvicorn",
+      "app.gateway.app:app",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "4322",
+    ]);
+    expect(command.env.GATEWAY_PORT).toBe("4322");
+    expect(command.env.PYTHONPATH).toContain(backendDir);
+    expect(command.env.PYTHONPATH).toContain(join(backendDir, "packages", "harness"));
+    expect(command.env.PYTHONPATH).toContain(join(backendDir, "site-packages"));
   });
 
   test("builds a packaged Next standalone command with register fetch preloaded", () => {
@@ -117,5 +147,30 @@ describe("readiness failure classification", () => {
     expect(
       classifyReadinessFailure("gateway", new Error("timeout"), "LocalSandboxProvider allow_host_bash sandbox"),
     ).toContain("local sandbox configuration invalid");
+  });
+});
+
+describe("runtime shutdown", () => {
+  test("closes proxy before stopping sidecars in reverse launch order", async () => {
+    const calls: string[] = [];
+    const proxy = {
+      close: async () => {
+        calls.push("proxy");
+      },
+    };
+    const gateway = {
+      stop: async () => {
+        calls.push("gateway");
+      },
+    };
+    const next = {
+      stop: async () => {
+        calls.push("next");
+      },
+    };
+
+    await stopRuntime(proxy, next, gateway);
+
+    expect(calls).toEqual(["proxy", "next", "gateway"]);
   });
 });

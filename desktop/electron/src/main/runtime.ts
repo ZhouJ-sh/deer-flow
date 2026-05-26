@@ -44,6 +44,14 @@ export type DesktopRuntime = {
   stop: () => Promise<void>;
 };
 
+type RuntimePart = {
+  stop: () => Promise<void>;
+};
+
+type RuntimeProxyPart = {
+  close: () => Promise<void>;
+};
+
 const READY_TIMEOUT_MS = 60_000;
 const INTERNAL_NEXT_HEADER = "x-deerflow-desktop-internal-next";
 
@@ -336,21 +344,20 @@ async function startNext(options: {
   });
 }
 
-async function stopRuntime(
-  proxy: DesktopProxy | null,
-  next: SidecarProcess | null,
-  gateway: SidecarProcess | null,
+export async function stopRuntime(
+  proxy: RuntimeProxyPart | null,
+  next: RuntimePart | null,
+  gateway: RuntimePart | null,
 ) {
-  if (next) {
-    await next.stop();
-  }
-
   if (proxy) {
     await proxy.close();
   }
 
-  if (gateway) {
-    await gateway.stop();
+  const sidecars: Array<RuntimePart | null> = [gateway, next];
+  for (const sidecar of sidecars.reverse()) {
+    if (sidecar) {
+      await sidecar.stop();
+    }
   }
 }
 
