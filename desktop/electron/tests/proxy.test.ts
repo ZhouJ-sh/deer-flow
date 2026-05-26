@@ -25,11 +25,11 @@ let dirs: string[] = [];
 let proxies: Array<{ close: () => Promise<void> }> = [];
 
 afterEach(async () => {
-  await Promise.all(proxies.map((proxy) => proxy.close()));
+  await Promise.allSettled(proxies.map((proxy) => proxy.close()));
   proxies = [];
-  await Promise.all(servers.map((server) => server.close()));
+  await Promise.allSettled(servers.map((server) => server.close()));
   servers = [];
-  await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.allSettled(dirs.map((dir) => rm(dir, { recursive: true, force: true })));
   dirs = [];
 });
 
@@ -145,10 +145,14 @@ describe("startDesktopProxy", () => {
     ]);
   });
 
-  test("proxies non-API requests to Next without leaking the desktop token", async () => {
+  test("proxies non-API requests to Next without leaking reserved desktop token headers", async () => {
     const { proxy, gateway, next } = await startTestProxy();
 
-    const response = await fetch(`${proxy.origin}/dashboard?tab=home`);
+    const response = await fetch(`${proxy.origin}/dashboard?tab=home`, {
+      headers: {
+        "x-deerflow-desktop-token": "browser-forged-token",
+      },
+    });
 
     expect(response.status).toBe(200);
     expect(gateway!.requests).toHaveLength(0);

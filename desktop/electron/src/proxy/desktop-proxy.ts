@@ -42,6 +42,8 @@ export async function startDesktopProxy(options: DesktopProxyOptions): Promise<D
         return;
       }
 
+      delete request.headers[DESKTOP_TOKEN_HEADER];
+
       if (route.kind === "next") {
         proxy.web(request, response, { target: options.nextOrigin });
         return;
