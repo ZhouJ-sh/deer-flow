@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2",
+    "get-port": "^7.2.0",
     "yaml": "^2.9.0"
   }
 }
