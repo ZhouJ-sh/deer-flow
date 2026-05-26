@@ -8,8 +8,8 @@
     "build": "tsc --noEmit -p tsconfig.json && pnpm build:bundle",
     "build:bundle": "tsup --config tsup.config.ts",
     "dev": "pnpm build && electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
+    "pack": "pnpm build && electron-builder --dir",
+    "dist": "pnpm build && electron-builder",
     "test": "vitest run",
     "test:watch": "vitest"
   },

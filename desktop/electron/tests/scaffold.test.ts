@@ -11,6 +11,12 @@ describe("desktop scaffold", () => {
     expect(pkg.default.scripts).not.toHaveProperty("smoke");
   });
 
+  test("builds before packaging from a clean output directory", async () => {
+    const pkg = await import("../package.json", { assert: { type: "json" } });
+    expect(pkg.default.scripts.pack).toBe("pnpm build && electron-builder --dir");
+    expect(pkg.default.scripts.dist).toBe("pnpm build && electron-builder");
+  });
+
   test("loads the bundled preload entrypoint from the main process", async () => {
     const main = await import("node:fs/promises").then(({ readFile }) =>
       readFile(new URL("../src/main/index.ts", import.meta.url), "utf8"),
