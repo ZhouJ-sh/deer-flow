@@ -53,6 +53,7 @@ type RuntimeProxyPart = {
 };
 
 const READY_TIMEOUT_MS = 60_000;
+const CLEANUP_TIMEOUT_MS = 5_000;
 const INTERNAL_NEXT_HEADER = "x-deerflow-desktop-internal-next";
 
 export function buildGatewayCommand(options: BuildGatewayCommandOptions): RuntimeCommand {
@@ -149,14 +150,6 @@ export function classifyReadinessFailure(
   const lower = source.toLowerCase();
 
   if (
-    lower.includes("localsandboxprovider") ||
-    lower.includes("allow_host_bash") ||
-    lower.includes("sandbox")
-  ) {
-    return `${name} local sandbox configuration invalid. Check LocalSandboxProvider and allow_host_bash in config.yaml.`;
-  }
-
-  if (
     lower.includes("modulenotfound") ||
     lower.includes("module not found") ||
     lower.includes("importerror") ||
@@ -182,6 +175,14 @@ export function classifyReadinessFailure(
 
   if (lower.includes("frontend") || lower.includes("next")) {
     return `${name} frontend failed to start. Check the Next.js startup log.`;
+  }
+
+  if (
+    lower.includes("localsandboxprovider") ||
+    lower.includes("allow_host_bash") ||
+    lower.includes("sandbox configuration")
+  ) {
+    return `${name} local sandbox configuration invalid. Check LocalSandboxProvider and allow_host_bash in config.yaml.`;
   }
 
   return `${name} failed to become ready: ${errorMessage(lastError)}`;
@@ -348,16 +349,31 @@ export async function stopRuntime(
   proxy: RuntimeProxyPart | null,
   next: RuntimePart | null,
   gateway: RuntimePart | null,
+  cleanupTimeoutMs = CLEANUP_TIMEOUT_MS,
 ) {
+  const errors: unknown[] = [];
+
   if (proxy) {
-    await proxy.close();
+    try {
+      await withTimeout(proxy.close(), cleanupTimeoutMs, "proxy close timed out");
+    } catch (error) {
+      errors.push(error);
+    }
   }
 
   const sidecars: Array<RuntimePart | null> = [gateway, next];
   for (const sidecar of sidecars.reverse()) {
     if (sidecar) {
-      await sidecar.stop();
+      try {
+        await withTimeout(sidecar.stop(), cleanupTimeoutMs, "sidecar stop timed out");
+      } catch (error) {
+        errors.push(error);
+      }
     }
+  }
+
+  if (errors.length > 0) {
+    throw new AggregateError(errors, "runtime cleanup failed");
   }
 }
 
@@ -367,6 +383,22 @@ function joinPaths(values: Array<string | undefined>): string {
 
 function joinNodeOptions(values: Array<string | undefined>): string {
   return values.filter((value): value is string => Boolean(value)).join(" ");
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    timeout.unref();
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 function errorMessage(error: unknown): string {

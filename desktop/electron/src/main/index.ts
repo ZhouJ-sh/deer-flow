@@ -1,7 +1,9 @@
-import { app } from "electron";
+import electron from "electron";
 
 import { startDesktopRuntime, type DesktopRuntime } from "./runtime.js";
 import { createDesktopWindow } from "./window.js";
+
+const { app } = electron;
 
 async function main() {
   await app.whenReady();

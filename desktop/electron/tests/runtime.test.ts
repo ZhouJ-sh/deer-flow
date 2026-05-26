@@ -148,6 +148,16 @@ describe("readiness failure classification", () => {
       classifyReadinessFailure("gateway", new Error("timeout"), "LocalSandboxProvider allow_host_bash sandbox"),
     ).toContain("local sandbox configuration invalid");
   });
+
+  test("prefers specific import diagnostics over broad sandbox text", () => {
+    expect(
+      classifyReadinessFailure(
+        "gateway",
+        new Error("timeout"),
+        "ModuleNotFoundError: No module named 'sandbox.plugins'",
+      ),
+    ).toContain("Gateway failed to import");
+  });
 });
 
 describe("runtime shutdown", () => {
@@ -170,6 +180,56 @@ describe("runtime shutdown", () => {
     };
 
     await stopRuntime(proxy, next, gateway);
+
+    expect(calls).toEqual(["proxy", "next", "gateway"]);
+  });
+
+  test("attempts every cleanup step even when one component fails", async () => {
+    const calls: string[] = [];
+    const proxy = {
+      close: async () => {
+        calls.push("proxy");
+        throw new Error("proxy close failed");
+      },
+    };
+    const gateway = {
+      stop: async () => {
+        calls.push("gateway");
+      },
+    };
+    const next = {
+      stop: async () => {
+        calls.push("next");
+      },
+    };
+
+    await expect(stopRuntime(proxy, next, gateway)).rejects.toThrow("runtime cleanup failed");
+
+    expect(calls).toEqual(["proxy", "next", "gateway"]);
+  });
+
+  test("attempts sidecar cleanup when proxy close hangs", async () => {
+    const calls: string[] = [];
+    const proxy = {
+      close: async () => {
+        calls.push("proxy");
+        await new Promise(() => {
+          // Intentionally never settles.
+        });
+      },
+    };
+    const gateway = {
+      stop: async () => {
+        calls.push("gateway");
+      },
+    };
+    const next = {
+      stop: async () => {
+        calls.push("next");
+      },
+    };
+
+    await expect(stopRuntime(proxy, next, gateway, 5)).rejects.toThrow("runtime cleanup failed");
 
     expect(calls).toEqual(["proxy", "next", "gateway"]);
   });

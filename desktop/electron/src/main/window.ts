@@ -1,10 +1,12 @@
-import { BrowserWindow, shell } from "electron";
+import electron from "electron";
+import type { BrowserWindow as BrowserWindowInstance } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const { BrowserWindow, shell } = electron;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export async function createDesktopWindow(url: string): Promise<BrowserWindow> {
+export async function createDesktopWindow(url: string): Promise<BrowserWindowInstance> {
   const window = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -21,7 +23,9 @@ export async function createDesktopWindow(url: string): Promise<BrowserWindow> {
   const appOrigin = new URL(url).origin;
 
   window.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
-    void shell.openExternal(targetUrl);
+    if (shouldOpenExternalUrl(targetUrl)) {
+      void shell.openExternal(targetUrl);
+    }
     return { action: "deny" };
   });
 
@@ -31,9 +35,20 @@ export async function createDesktopWindow(url: string): Promise<BrowserWindow> {
     }
 
     event.preventDefault();
-    void shell.openExternal(targetUrl);
+    if (shouldOpenExternalUrl(targetUrl)) {
+      void shell.openExternal(targetUrl);
+    }
   });
 
   await window.loadURL(url);
   return window;
+}
+
+export function shouldOpenExternalUrl(targetUrl: string): boolean {
+  try {
+    const protocol = new URL(targetUrl).protocol;
+    return protocol === "http:" || protocol === "https:" || protocol === "mailto:";
+  } catch {
+    return false;
+  }
 }
