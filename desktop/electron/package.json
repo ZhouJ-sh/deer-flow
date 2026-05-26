@@ -1,0 +1,36 @@
+{
+  "name": "@deer-flow/desktop-electron",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json && pnpm build:bundle",
+    "build:bundle": "tsup --config tsup.config.ts",
+    "dev": "pnpm build && electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "node dist/scripts/smoke-packaged.js"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
+    "dotenv": "^17.2.3",
+    "get-port": "^7.1.0",
+    "http-proxy": "^1.18.1",
+    "mime": "^4.1.0",
+    "yaml": "^2.8.3"
+  },
+  "devDependencies": {
+    "@types/http-proxy": "^1.17.16",
+    "@types/mime": "^3.0.4",
+    "@types/node": "^20.14.10",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "tsup": "^8.5.1",
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.4"
+  }
+}
