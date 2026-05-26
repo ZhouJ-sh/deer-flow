@@ -14,6 +14,7 @@ export default defineConfig([
     ...sharedConfig,
     entry: {
       "main/index": "src/main/index.ts",
+      "proxy/desktop-proxy": "src/proxy/desktop-proxy.ts",
     },
     format: ["esm"],
     clean: true,
