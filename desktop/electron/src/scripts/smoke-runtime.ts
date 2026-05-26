@@ -8,6 +8,11 @@ import { parse } from "yaml";
 import { startDesktopRuntime, type DesktopRuntime } from "../main/runtime.js";
 
 type CookieJar = Map<string, string>;
+export type SmokeRuntimeArgs = {
+  appPath: string;
+  resourcesPath: string;
+  packaged: boolean;
+};
 
 export async function smokeRuntime(options: {
   appPath: string;
@@ -42,10 +47,25 @@ export async function smokeRuntime(options: {
     await assertLocalSandboxConfig(join(appDataRoot, "config.yaml"));
     console.log("Desktop runtime smoke passed");
   } finally {
+    await cleanupSmokeRuntime(runtime, appDataRoot);
+  }
+}
+
+export async function cleanupSmokeRuntime(runtime: DesktopRuntime | null, appDataRoot: string): Promise<void> {
+  let stopError: unknown;
+
+  try {
     if (runtime) {
       await runtime.stop();
     }
+  } catch (error) {
+    stopError = error;
+  } finally {
     await rm(appDataRoot, { recursive: true, force: true });
+  }
+
+  if (stopError) {
+    throw stopError;
   }
 }
 
@@ -134,17 +154,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  const packaged = args.includes("--packaged");
-  const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const appPath = getArgValue(args, "--app-path") ?? resolve(scriptDir, "..");
-  const resourcesPath = getArgValue(args, "--resources-path") ?? join(appPath, "resources");
+  await smokeRuntime(parseSmokeRuntimeArgs());
+}
 
-  await smokeRuntime({
+export function parseSmokeRuntimeArgs(
+  args: string[] = process.argv.slice(2),
+  scriptPath = fileURLToPath(import.meta.url),
+): SmokeRuntimeArgs {
+  const packaged = args.includes("--packaged");
+  const positionalRepoRoot = args.find((arg) => !arg.startsWith("--"));
+  const scriptDir = dirname(scriptPath);
+  const defaultAppPath = positionalRepoRoot
+    ? resolve(positionalRepoRoot, "desktop", "electron")
+    : resolve(scriptDir, "..", "..");
+  const appPath = resolve(getArgValue(args, "--app-path") ?? defaultAppPath);
+  const resourcesPath = resolve(
+    getArgValue(args, "--resources-path") ??
+      getArgValue(args, "--resources") ??
+      join(appPath, "resources"),
+  );
+
+  return {
     appPath,
     resourcesPath,
     packaged,
-  });
+  };
 }
 
 function getArgValue(args: string[], name: string): string | undefined {

@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { access, cp, mkdir, rm } from "node:fs/promises";
+import { access, cp, mkdir, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,25 +42,25 @@ export async function stageRuntime(repoRoot: string, outDir: string): Promise<Ru
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
 
-  await Promise.all([
-    copyPath(join(root, "backend", "app"), join(layout.backend, "app")),
-    copyPath(join(root, "backend", "packages"), join(layout.backend, "packages")),
-    copyPath(join(root, "backend", "pyproject.toml"), join(layout.backend, "pyproject.toml")),
-    copyPath(join(root, "backend", "uv.lock"), join(layout.backend, "uv.lock")),
-    copyPath(join(root, "config.example.yaml"), join(layout.backend, "config.example.yaml")),
-    copyPath(join(root, "extensions_config.example.json"), join(layout.backend, "extensions_config.example.json")),
-    copyPath(env.DEER_FLOW_DESKTOP_PYTHON_SITE_PACKAGES_DIR, join(layout.backend, "site-packages")),
-    copyPath(join(root, "frontend", ".next", "standalone"), join(layout.frontend, ".next", "standalone")),
-    copyPath(
-      join(root, "frontend", ".next", "static"),
-      join(layout.frontend, ".next", "standalone", ".next", "static"),
-    ),
-    copyPath(join(root, "frontend", "public"), join(layout.frontend, ".next", "standalone", "public")),
-    copyPath(join(root, "desktop", "electron", "dist", "proxy"), join(layout.desktopServer, "proxy")),
-    copyPath(join(root, "desktop", "electron", "dist", "next"), join(layout.desktopServer, "next")),
-    copyPath(env.DEER_FLOW_DESKTOP_NODE_RUNTIME_DIR, layout.nodeRuntime),
-    copyPath(env.DEER_FLOW_DESKTOP_PYTHON_RUNTIME_DIR, layout.pythonRuntime),
-  ]);
+  await copyPath(join(root, "backend", "app"), join(layout.backend, "app"));
+  await copyPath(join(root, "backend", "packages"), join(layout.backend, "packages"));
+  await copyPath(join(root, "backend", "pyproject.toml"), join(layout.backend, "pyproject.toml"));
+  await copyPath(join(root, "backend", "uv.lock"), join(layout.backend, "uv.lock"));
+  await copyPath(join(root, "config.example.yaml"), join(layout.backend, "config.example.yaml"));
+  await copyPath(join(root, "extensions_config.example.json"), join(layout.backend, "extensions_config.example.json"));
+  await copyPath(env.DEER_FLOW_DESKTOP_PYTHON_SITE_PACKAGES_DIR, join(layout.backend, "site-packages"));
+
+  await copyPath(join(root, "frontend", ".next", "standalone"), join(layout.frontend, ".next", "standalone"));
+  await copyPath(
+    join(root, "frontend", ".next", "static"),
+    join(layout.frontend, ".next", "standalone", ".next", "static"),
+  );
+  await copyPath(join(root, "frontend", "public"), join(layout.frontend, ".next", "standalone", "public"));
+
+  await copyPath(join(root, "desktop", "electron", "dist", "proxy"), join(layout.desktopServer, "proxy"));
+  await copyPath(join(root, "desktop", "electron", "dist", "next"), join(layout.desktopServer, "next"));
+  await copyPath(env.DEER_FLOW_DESKTOP_NODE_RUNTIME_DIR, layout.nodeRuntime);
+  await copyPath(env.DEER_FLOW_DESKTOP_PYTHON_RUNTIME_DIR, layout.pythonRuntime);
 
   return layout;
 }
@@ -92,9 +92,16 @@ async function copyPath(source: string, destination: string): Promise<void> {
 
 async function assertSourceDir(path: string, envName: string): Promise<void> {
   try {
+    const stats = await stat(path);
+    if (!stats.isDirectory()) {
+      throw new Error(`${envName} points to ${path}, but it is not a readable directory.`);
+    }
     await access(path, constants.R_OK);
   } catch (error) {
-    throw new Error(`${envName} points to ${path}, but it is not readable.`, { cause: error });
+    if (error instanceof Error && error.message.includes("not a readable directory")) {
+      throw error;
+    }
+    throw new Error(`${envName} points to ${path}, but it is not a readable directory.`, { cause: error });
   }
 }
 
