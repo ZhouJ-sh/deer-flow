@@ -7,8 +7,8 @@ import { parse, stringify } from "yaml";
 
 export type DesktopDataOptions = {
   root: string;
-  configExamplePath?: string;
-  extensionsConfigExamplePath?: string;
+  exampleConfigPath?: string;
+  exampleExtensionsConfigPath?: string;
 };
 
 export type DesktopDataPaths = {
@@ -23,8 +23,8 @@ export type DesktopDataPaths = {
   envPath: string;
   tokenPath: string;
   installIdPath: string;
-  configExamplePath?: string;
-  extensionsConfigExamplePath?: string;
+  exampleConfigPath?: string;
+  exampleExtensionsConfigPath?: string;
 };
 
 const userOnlyFileMode = 0o600;
@@ -45,8 +45,8 @@ export async function ensureDesktopData(options: DesktopDataOptions): Promise<De
     envPath: join(root, ".env"),
     tokenPath: join(root, "desktop-token"),
     installIdPath: join(root, "install-id"),
-    configExamplePath: options.configExamplePath,
-    extensionsConfigExamplePath: options.extensionsConfigExamplePath,
+    exampleConfigPath: options.exampleConfigPath,
+    exampleExtensionsConfigPath: options.exampleExtensionsConfigPath,
   };
 
   await Promise.all([
@@ -91,7 +91,7 @@ function randomSecret(): string {
 }
 
 async function ensureConfig(paths: DesktopDataPaths): Promise<void> {
-  await ensureTextFile(paths.configPath, fallbackConfig(), paths.configExamplePath);
+  await ensureTextFile(paths.configPath, fallbackConfig(), paths.exampleConfigPath);
 
   const rawConfig = await readFile(paths.configPath, "utf8");
   const parsed = parse(rawConfig);
@@ -120,8 +120,8 @@ async function ensureExtensionsConfig(paths: DesktopDataPaths): Promise<void> {
     return;
   }
 
-  if (paths.extensionsConfigExamplePath && (await exists(paths.extensionsConfigExamplePath))) {
-    await copyFile(paths.extensionsConfigExamplePath, paths.extensionsConfigPath);
+  if (paths.exampleExtensionsConfigPath && (await exists(paths.exampleExtensionsConfigPath))) {
+    await copyFile(paths.exampleExtensionsConfigPath, paths.extensionsConfigPath);
     await chmodUserOnly(paths.extensionsConfigPath);
     return;
   }

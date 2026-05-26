@@ -12,8 +12,8 @@ async function makeRoot() {
 }
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
-const configExamplePath = join(repoRoot, "config.example.yaml");
-const extensionsConfigExamplePath = join(repoRoot, "extensions_config.example.json");
+const exampleConfigPath = join(repoRoot, "config.example.yaml");
+const exampleExtensionsConfigPath = join(repoRoot, "extensions_config.example.json");
 
 describe("ensureDesktopData", () => {
   test("creates stable app-data paths from examples and sanitizes desktop config", async () => {
@@ -21,8 +21,8 @@ describe("ensureDesktopData", () => {
 
     const paths = await ensureDesktopData({
       root,
-      configExamplePath,
-      extensionsConfigExamplePath,
+      exampleConfigPath,
+      exampleExtensionsConfigPath,
     });
 
     expect(paths).toEqual({
@@ -37,8 +37,8 @@ describe("ensureDesktopData", () => {
       envPath: join(root, ".env"),
       tokenPath: join(root, "desktop-token"),
       installIdPath: join(root, "install-id"),
-      configExamplePath,
-      extensionsConfigExamplePath,
+      exampleConfigPath,
+      exampleExtensionsConfigPath,
     });
 
     await expect(stat(paths.deerFlowHome)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
@@ -66,7 +66,7 @@ describe("ensureDesktopData", () => {
 
   test("re-sanitizes stale config while preserving unrelated fields and existing extensions config", async () => {
     const root = await makeRoot();
-    await ensureDesktopData({ root, configExamplePath, extensionsConfigExamplePath });
+    await ensureDesktopData({ root, exampleConfigPath, exampleExtensionsConfigPath });
 
     const customExtensions = { mcpServers: { local: { enabled: true } }, skills: { keep: true } };
     await writeFile(
@@ -97,7 +97,7 @@ describe("ensureDesktopData", () => {
     );
     await writeFile(join(root, "extensions_config.json"), `${JSON.stringify(customExtensions, null, 2)}\n`);
 
-    const paths = await ensureDesktopData({ root, configExamplePath, extensionsConfigExamplePath });
+    const paths = await ensureDesktopData({ root, exampleConfigPath, exampleExtensionsConfigPath });
 
     const config = parse(await readFile(paths.configPath, "utf8"));
     expect(config.log_level).toBe("debug");
