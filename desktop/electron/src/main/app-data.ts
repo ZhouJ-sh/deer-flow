@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, chmod, copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { parse, stringify } from "yaml";
@@ -9,6 +9,7 @@ export type DesktopDataOptions = {
   root: string;
   exampleConfigPath?: string;
   exampleExtensionsConfigPath?: string;
+  bundledSkillsPath?: string;
 };
 
 export type DesktopDataPaths = {
@@ -23,8 +24,10 @@ export type DesktopDataPaths = {
   envPath: string;
   tokenPath: string;
   installIdPath: string;
+  skillsPath: string;
   exampleConfigPath?: string;
   exampleExtensionsConfigPath?: string;
+  bundledSkillsPath?: string;
 };
 
 const userOnlyFileMode = 0o600;
@@ -45,8 +48,10 @@ export async function ensureDesktopData(options: DesktopDataOptions): Promise<De
     envPath: join(root, ".env"),
     tokenPath: join(root, "desktop-token"),
     installIdPath: join(root, "install-id"),
+    skillsPath: join(root, "skills"),
     exampleConfigPath: options.exampleConfigPath,
     exampleExtensionsConfigPath: options.exampleExtensionsConfigPath,
+    bundledSkillsPath: options.bundledSkillsPath,
   };
 
   await Promise.all([
@@ -61,8 +66,27 @@ export async function ensureDesktopData(options: DesktopDataOptions): Promise<De
   await ensureTextFile(paths.envPath, "");
   await ensureSecretFile(paths.tokenPath, `${randomSecret()}\n`);
   await ensureSecretFile(paths.installIdPath, `${randomUUID()}\n`);
+  await ensureBundledSkills(paths);
 
   return paths;
+}
+
+async function ensureBundledSkills(paths: DesktopDataPaths): Promise<void> {
+  if (await exists(paths.skillsPath)) {
+    return;
+  }
+
+  if (paths.bundledSkillsPath && (await exists(paths.bundledSkillsPath))) {
+    await cp(paths.bundledSkillsPath, paths.skillsPath, {
+      recursive: true,
+      dereference: false,
+      force: false,
+      errorOnExist: true,
+    });
+    return;
+  }
+
+  await mkdir(paths.skillsPath, { recursive: true });
 }
 
 export async function ensureSecretTextFile(path: string, createValue: () => string): Promise<string> {

@@ -9,6 +9,7 @@ export type RuntimeLayout = {
   pythonRuntime: string;
   nodeRuntime: string;
   desktopServer: string;
+  skills: string;
 };
 
 const requiredRuntimeEnv = {
@@ -26,6 +27,7 @@ export function runtimeLayout(_repoRoot: string, outDir: string): RuntimeLayout 
     pythonRuntime: join(root, "runtimes", "python"),
     nodeRuntime: join(root, "runtimes", "node"),
     desktopServer: join(root, "desktop-server"),
+    skills: join(root, "skills"),
   };
 }
 
@@ -59,6 +61,7 @@ export async function stageRuntime(repoRoot: string, outDir: string): Promise<Ru
 
   await copyPath(join(root, "desktop", "electron", "dist", "proxy"), join(layout.desktopServer, "proxy"));
   await copyPath(join(root, "desktop", "electron", "dist", "next"), join(layout.desktopServer, "next"));
+  await copyPath(join(root, "skills"), layout.skills);
   await copyPath(env.DEER_FLOW_DESKTOP_NODE_RUNTIME_DIR, layout.nodeRuntime);
   await copyPath(env.DEER_FLOW_DESKTOP_PYTHON_RUNTIME_DIR, layout.pythonRuntime);
 

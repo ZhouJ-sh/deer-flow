@@ -35,6 +35,7 @@ from deerflow.config.tool_search_config import ToolSearchConfig, load_tool_searc
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+LOCAL_SANDBOX_PROVIDER = "deerflow.sandbox.local:LocalSandboxProvider"
 
 
 CONFIG_FILE_DATABASE_DEFAULTS = {
@@ -169,6 +170,7 @@ class AppConfig(BaseModel):
         # Load extensions config separately (it's in a different file)
         extensions_config = ExtensionsConfig.from_file()
         config_data["extensions"] = extensions_config.model_dump()
+        cls._enforce_desktop_sandbox(config_data)
 
         result = cls.model_validate(config_data)
         acp_agents = cls._validate_acp_agents(config_data.get("acp_agents", {}))
@@ -183,6 +185,17 @@ class AppConfig(BaseModel):
         if config_data is None:
             config_data = {}
         return {name: ACPAgentConfig(**cfg) for name, cfg in config_data.items()}
+
+    @classmethod
+    def _enforce_desktop_sandbox(cls, config_data: Mapping[str, Any]) -> None:
+        """Keep desktop mode on the host-local sandbox provider, including reloads."""
+        if os.getenv("DEER_FLOW_DESKTOP") != "1":
+            return
+
+        sandbox = config_data.get("sandbox")
+        sandbox_use = sandbox.get("use") if isinstance(sandbox, Mapping) else None
+        if sandbox_use != LOCAL_SANDBOX_PROVIDER:
+            raise ValueError(f"Desktop mode only supports LocalSandboxProvider ({LOCAL_SANDBOX_PROVIDER}).")
 
     @classmethod
     def _apply_singleton_configs(cls, config: Self, acp_agents: dict[str, ACPAgentConfig]) -> None:

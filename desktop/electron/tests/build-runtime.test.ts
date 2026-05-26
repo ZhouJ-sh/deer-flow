@@ -19,6 +19,7 @@ describe("runtimeLayout", () => {
       pythonRuntime: join(outDir, "runtimes", "python"),
       nodeRuntime: join(outDir, "runtimes", "node"),
       desktopServer: join(outDir, "desktop-server"),
+      skills: join(outDir, "skills"),
     });
   });
 
@@ -49,6 +50,15 @@ describe("stage-python-deps arguments", () => {
   });
 });
 
+describe("stage-python-deps implementation", () => {
+  test("runs uv pip install from the backend directory so exported editable paths resolve", async () => {
+    const source = await readFile(new URL("../src/scripts/stage-python-deps.ts", import.meta.url), "utf8");
+
+    expect(source).toContain("cwd: options.cwd");
+    expect(source).toMatch(/run\("uv", \[[\s\S]*"pip"[\s\S]*\], \{ cwd: backend \}\)/);
+  });
+});
+
 describe("stageRuntime", () => {
   test("copies packaged backend, frontend, desktop server, and runtime artifacts", async () => {
     const fixtureRoot = resolve("node_modules", ".tmp", `stage-runtime-${process.pid}-${Date.now()}`);
@@ -68,6 +78,7 @@ describe("stageRuntime", () => {
         await expect(readFile(join(outDir, "stale.txt"), "utf8")).rejects.toThrow();
         await expect(readFile(join(layout.backend, "app", "main.py"), "utf8")).resolves.toBe("app");
         await expect(readFile(join(layout.backend, "site-packages", "deps.txt"), "utf8")).resolves.toBe("deps");
+        await expect(readFile(join(outDir, "skills", "public", "research", "SKILL.md"), "utf8")).resolves.toBe("skill");
         await expect(readFile(join(layout.frontend, ".next", "standalone", "server.js"), "utf8")).resolves.toBe("server");
         await expect(
           readFile(join(layout.frontend, ".next", "standalone", ".next", "static", "asset.txt"), "utf8"),
@@ -196,6 +207,7 @@ async function writeStageRuntimeFixture(
     join(repoRoot, "frontend", "public"),
     join(repoRoot, "desktop", "electron", "dist", "proxy"),
     join(repoRoot, "desktop", "electron", "dist", "next"),
+    join(repoRoot, "skills", "public", "research"),
     join(nodeRuntime, "bin"),
     join(pythonRuntime, "bin"),
     sitePackages,
@@ -214,6 +226,7 @@ async function writeStageRuntimeFixture(
     writeFile(join(repoRoot, "frontend", "public", "public.txt"), "public", "utf8"),
     writeFile(join(repoRoot, "desktop", "electron", "dist", "proxy", "desktop-proxy.js"), "proxy", "utf8"),
     writeFile(join(repoRoot, "desktop", "electron", "dist", "next", "register-fetch.js"), "next", "utf8"),
+    writeFile(join(repoRoot, "skills", "public", "research", "SKILL.md"), "skill", "utf8"),
     writeFile(join(nodeRuntime, "bin", "node"), "node", "utf8"),
     writeFile(join(pythonRuntime, "bin", "python"), "python", "utf8"),
     writeFile(join(sitePackages, "deps.txt"), "deps", "utf8"),
@@ -264,6 +277,7 @@ async function writePackagedFixture(resourcesPath: string, includeRuntimeExecuta
     join(resourcesPath, "frontend", ".next", "standalone", "public"),
     join(resourcesPath, "desktop-server", "proxy"),
     join(resourcesPath, "desktop-server", "next"),
+    join(resourcesPath, "skills", "public"),
     join(resourcesPath, "runtimes", "node"),
     join(resourcesPath, "runtimes", "python"),
   ];

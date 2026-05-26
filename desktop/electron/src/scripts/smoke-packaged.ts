@@ -22,6 +22,7 @@ export async function smokePackaged(resourcesPath: string): Promise<void> {
     join(layout.frontend, ".next", "standalone", "public"),
     join(layout.desktopServer, "proxy"),
     join(layout.desktopServer, "next"),
+    join(layout.skills, "public"),
     runtimeExecutablePath(layout.nodeRuntime, "node"),
     runtimeExecutablePath(layout.pythonRuntime, "python"),
   ];

@@ -50,6 +50,7 @@ resources/
     node/
     python/
   desktop-server/
+  skills/
 ```
 
 Build frontend standalone first:
@@ -98,11 +99,13 @@ With this provider, file and tool data map to local per-thread directories. `all
 
 - `backend/app/gateway/desktop_token_middleware.py`
 - `backend/app/gateway/app.py`
+- `backend/packages/harness/deerflow/config/app_config.py`
+- `backend/tests/test_app_config_reload.py`
 - `backend/tests/test_desktop_token_middleware.py`
 - `docs/desktop-local-runtime.md`
 - `README.md`
 
-All desktop orchestration code lives under `desktop/electron/`. The backend touch points are feature-flagged by `DEER_FLOW_DESKTOP=1`.
+All desktop orchestration code lives under `desktop/electron/`. The backend touch points are feature-flagged by `DEER_FLOW_DESKTOP=1`; that flag enables the loopback token guard and rejects non-`LocalSandboxProvider` config during desktop config loads and reloads.
 
 ## Smoke Matrix
 

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -37,14 +37,17 @@ describe("ensureDesktopData", () => {
       envPath: join(root, ".env"),
       tokenPath: join(root, "desktop-token"),
       installIdPath: join(root, "install-id"),
+      skillsPath: join(root, "skills"),
       exampleConfigPath,
       exampleExtensionsConfigPath,
+      bundledSkillsPath: undefined,
     });
 
     await expect(stat(paths.deerFlowHome)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
     await expect(stat(paths.dataDir)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
     await expect(stat(paths.logsDir)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
     await expect(stat(paths.runtimeDir)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
+    await expect(stat(paths.skillsPath)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
     await expect(readFile(paths.envPath, "utf8")).resolves.toBe("");
 
     const config = parse(await readFile(paths.configPath, "utf8"));
@@ -143,5 +146,22 @@ describe("ensureDesktopData", () => {
     expect(newToken).not.toBe(token);
     expect(newInstallId).toMatch(/^[0-9a-f-]{36}\n$/);
     expect(newInstallId).not.toBe(installId);
+  });
+
+  test("copies bundled skills into app data only on first run", async () => {
+    const root = await makeRoot();
+    const bundledSkillsPath = join(root, "bundled-skills");
+    await mkdir(join(bundledSkillsPath, "public", "research"), { recursive: true });
+    await writeFile(join(bundledSkillsPath, "public", "research", "SKILL.md"), "bundled", "utf8");
+
+    const first = await ensureDesktopData({ root, bundledSkillsPath });
+    await expect(readFile(join(first.skillsPath, "public", "research", "SKILL.md"), "utf8")).resolves.toBe("bundled");
+
+    await writeFile(join(first.skillsPath, "public", "research", "SKILL.md"), "customized", "utf8");
+    const second = await ensureDesktopData({ root, bundledSkillsPath });
+
+    await expect(readFile(join(second.skillsPath, "public", "research", "SKILL.md"), "utf8")).resolves.toBe(
+      "customized",
+    );
   });
 });

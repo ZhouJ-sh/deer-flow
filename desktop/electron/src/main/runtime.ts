@@ -219,6 +219,9 @@ export async function startDesktopRuntime(
   options: StartDesktopRuntimeOptions,
 ): Promise<DesktopRuntime> {
   const resources = resolveDesktopResources(options);
+  const bundledSkillsPath = resources.repoRoot
+    ? join(resources.repoRoot, "skills")
+    : join(options.resourcesPath, "skills");
   const paths = await ensureDesktopData({
     root: options.appDataRoot,
     exampleConfigPath: resources.repoRoot
@@ -227,6 +230,7 @@ export async function startDesktopRuntime(
     exampleExtensionsConfigPath: resources.repoRoot
       ? join(resources.repoRoot, "extensions_config.example.json")
       : join(resources.backendDir, "extensions_config.example.json"),
+    bundledSkillsPath,
   });
   const ports = await allocateDesktopPorts();
   const gatewayOrigin = `http://127.0.0.1:${ports.gatewayPort}`;

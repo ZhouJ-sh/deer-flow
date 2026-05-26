@@ -24,6 +24,7 @@ export async function buildGatewayEnv(
     DEER_FLOW_CONFIG_PATH: paths.configPath,
     DEER_FLOW_EXTENSIONS_CONFIG_PATH: paths.extensionsConfigPath,
     DEER_FLOW_PROJECT_ROOT: paths.root,
+    DEER_FLOW_SKILLS_PATH: paths.skillsPath,
     DEER_FLOW_DESKTOP_TOKEN_FILE: paths.tokenPath,
     GATEWAY_HOST: "127.0.0.1",
     GATEWAY_CORS_ORIGINS: options.frontendOrigin,

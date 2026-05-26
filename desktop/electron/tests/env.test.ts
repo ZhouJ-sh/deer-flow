@@ -54,6 +54,7 @@ describe("desktop env helpers", () => {
     expect(env.DEER_FLOW_CONFIG_PATH).toBe(paths.configPath);
     expect(env.DEER_FLOW_EXTENSIONS_CONFIG_PATH).toBe(paths.extensionsConfigPath);
     expect(env.DEER_FLOW_PROJECT_ROOT).toBe(paths.root);
+    expect(env.DEER_FLOW_SKILLS_PATH).toBe(join(paths.root, "skills"));
     expect(env.DEER_FLOW_DESKTOP_TOKEN_FILE).toBe(paths.tokenPath);
     expect(env.GATEWAY_HOST).toBe("127.0.0.1");
     expect(env.GATEWAY_CORS_ORIGINS).toBe("app://deer-flow");

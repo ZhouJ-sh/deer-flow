@@ -39,7 +39,7 @@ export async function stagePythonDeps(backendDir: string, outDir: string): Promi
       "--no-hashes",
       "--output-file",
       requirementsPath,
-    ]);
+    ], { cwd: backend });
     await rm(output, { recursive: true, force: true });
     await run("uv", [
       "pip",
@@ -50,15 +50,16 @@ export async function stagePythonDeps(backendDir: string, outDir: string): Promi
       output,
       "--requirement",
       requirementsPath,
-    ]);
+    ], { cwd: backend });
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
 }
 
-async function run(command: string, args: string[]): Promise<void> {
+async function run(command: string, args: string[], options: { cwd?: string } = {}): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
     const child = spawn(command, args, {
+      cwd: options.cwd,
       stdio: "inherit",
       env: process.env,
     });
