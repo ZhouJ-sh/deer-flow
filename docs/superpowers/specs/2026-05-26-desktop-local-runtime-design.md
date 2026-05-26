@@ -69,9 +69,16 @@ Cons:
 
 ## 4. Recommended Architecture
 
-Use **Approach A: Electron thin shell with local DeerFlow sidecars** for phase one.
+Use **Approach A: Electron thin shell with local DeerFlow sidecars**.
 
 New code should live under `desktop/electron/` and related documentation/scripts. Existing DeerFlow source should only receive small, explicit compatibility hooks when unavoidable.
+
+There are two explicit delivery gates:
+
+| Phase | Audience | Security bar |
+|---|---|---|
+| Developer shell | Contributors only | May rely on local dev servers and existing auth behavior. Not shippable to customers. |
+| Packaged customer runtime | Customers | Must include the desktop local access token, existing user auth/setup, loopback-only Gateway binding, concrete frontend serving mode, and packaged runtime artifacts. |
 
 ### 4.1 Process Model
 
@@ -96,11 +103,11 @@ Desktop startup:
      - `DEER_FLOW_EXTENSIONS_CONFIG_PATH=<app-data>/extensions_config.json`
      - `GATEWAY_CORS_ORIGINS=<desktop frontend origin>`
      - `DEER_FLOW_DESKTOP=1`
-5. It starts or serves the packaged frontend:
-   - Development: point to `next dev` or an externally running dev URL.
-   - Packaged build: run Next standalone server or an equivalent packaged web server.
+5. It starts or serves the frontend:
+   - Developer shell: point to `next dev` or an externally running dev URL.
+   - Packaged customer runtime: run the packaged Next standalone server.
 6. It opens a BrowserWindow to the local frontend URL.
-7. On app quit, it terminates child processes and best-effort cleans up running sandbox containers that belong to the desktop app.
+7. On app quit, it terminates child processes and best-effort cleans up sandbox containers whose configured desktop container prefix matches this app install.
 
 ### 4.2 Runtime Ownership
 
@@ -139,7 +146,27 @@ BrowserWindow
 
 No new Agent API should be introduced in phase one.
 
-### 4.4 Sandbox Strategy
+### 4.4 Frontend Serving Decision
+
+Packaged customer runtime uses **Next standalone**, not static export or a custom Electron protocol.
+
+Rationale:
+
+- The current frontend uses SSR auth checks and Next rewrites.
+- Static export would require broader frontend changes.
+- Next standalone keeps the existing `/api/langgraph/*` and `/api/*` same-origin shape.
+
+Packaged startup requirements:
+
+- Build frontend with `NEXT_CONFIG_BUILD_OUTPUT=standalone`.
+- Bundle a Node runtime compatible with the built Next server.
+- Start `.next/standalone/server.js` on `127.0.0.1:<frontend-port>`.
+- Set `DEER_FLOW_INTERNAL_GATEWAY_BASE_URL=http://127.0.0.1:<gateway-port>` before starting the frontend server.
+- Persist or generate `BETTER_AUTH_SECRET` under the desktop app-data directory.
+- Do not set `NEXT_PUBLIC_LANGGRAPH_BASE_URL` or `NEXT_PUBLIC_BACKEND_BASE_URL` for the packaged MVP; client code should keep using the current same-origin defaults.
+- Configure Gateway CORS/CSRF origins to the chosen frontend origin.
+
+### 4.5 Sandbox Strategy
 
 Use existing sandbox providers:
 
@@ -150,6 +177,8 @@ Use existing sandbox providers:
 | K8s/provisioner mode | Enterprise managed sandbox pools | Out of scope for desktop MVP unless already configured by a customer. |
 
 The desktop shell should not bypass `SandboxProvider` or call host commands directly on behalf of agent tools.
+
+Desktop AIO sandbox configs must set a desktop-specific `container_prefix`, for example `deer-flow-desktop-<install-id>`. Cleanup may only target containers with that exact prefix. It must never call broad cleanup against the generic `deer-flow-sandbox` prefix from a customer desktop app.
 
 ## 5. Minimal Core Changes
 
@@ -177,22 +206,36 @@ To preserve upstream mergeability, phase one should aim for:
 Only if needed:
 
 1. Gateway host/port/env defaults that allow binding to `127.0.0.1:<dynamic-port>`.
-2. A desktop-local auth middleware switch, guarded by `DEER_FLOW_DESKTOP=1`.
+2. A desktop token guard middleware switch, guarded by `DEER_FLOW_DESKTOP=1`.
 3. Frontend config fallback for desktop-provided local URLs.
 4. Documentation of desktop mode in README/install docs.
 
 Any core hook should be small, feature-flagged, covered by tests, and explain why the desktop shell cannot handle it externally.
 
+### Upstream Touch Policy
+
+Every change outside `desktop/electron/` must be tracked in an "upstream touch list" in the implementation PR:
+
+| Touch type | Rule |
+|---|---|
+| Gateway hook | Guard behind `DEER_FLOW_DESKTOP=1` or a narrower `DEER_FLOW_DESKTOP_*` env var. |
+| Frontend hook | Prefer one small desktop compatibility helper over edits spread through chat/runtime components. |
+| Config docs | Keep examples additive; do not rewrite existing deployment docs. |
+| Tests | Add a focused regression test for each hook. |
+| Ownership | Record file, reason, and removal criteria in the PR or implementation plan. |
+
 ## 6. Security Design
 
 Desktop mode creates a local HTTP surface. It must not assume that "localhost" is automatically private.
 
-Required phase-one controls:
+Required controls before any packaged customer runtime:
 
 - Gateway binds to `127.0.0.1`, not `0.0.0.0`.
-- Electron generates a per-install or per-session local secret.
-- Requests from the packaged frontend to Gateway carry that secret through a cookie or header.
-- Gateway verifies the secret only when `DEER_FLOW_DESKTOP=1`.
+- Electron generates a per-install desktop local access token and stores it in the desktop app-data directory with user-only filesystem permissions where the OS supports them.
+- The packaged Next frontend is the only browser-facing origin. It proxies Gateway requests through its existing rewrites.
+- The Next server, not renderer JavaScript, attaches `X-DeerFlow-Desktop-Token` when proxying to Gateway.
+- Gateway verifies `X-DeerFlow-Desktop-Token` only when `DEER_FLOW_DESKTOP=1`; requests missing or failing the token are rejected before normal auth processing.
+- Renderer JavaScript never receives the desktop token, and the token is never stored in localStorage.
 - CORS and CSRF settings allow only the desktop frontend origin.
 - The BrowserWindow uses conservative settings:
   - no Node integration in renderer
@@ -209,6 +252,20 @@ Deferred security enhancements:
 - Device attestation or cloud license binding.
 - Enterprise policy file for disabling host-local sandbox modes.
 
+### Desktop Auth Decision
+
+Desktop mode keeps DeerFlow's existing user auth/setup flow. The desktop local access token is only a same-machine transport guard; it is not a user identity and must not replace `access_token` session cookies.
+
+Request order in packaged customer runtime:
+
+1. CORS handles browser origin preflight for the local frontend origin.
+2. Desktop token guard rejects non-public Gateway requests without the correct `X-DeerFlow-Desktop-Token` when `DEER_FLOW_DESKTOP=1`.
+3. Existing `CSRFMiddleware` validates state-changing browser requests with the normal `csrf_token` double-submit flow.
+4. Existing `AuthMiddleware` validates the normal `access_token` cookie or internal auth token and stamps `request.state.user`.
+5. Existing route-level authorization and user isolation continue to operate unchanged.
+
+First-run setup remains the existing `/setup` / `/api/v1/auth/initialize` flow. The first local admin user becomes the owner for desktop thread state. No synthetic desktop user should be introduced in the MVP because that would fork user isolation behavior from the existing Gateway model.
+
 ## 7. Configuration and Data
 
 Desktop data should be isolated from the source checkout:
@@ -218,10 +275,21 @@ Desktop data should be isolated from the source checkout:
   config.yaml
   extensions_config.json
   .env
+  desktop-token
+  better-auth-secret
   .deer-flow/
     memory.json
     users/
-    threads/
+      <desktop-admin-user-id>/
+        memory.json
+        threads/
+          <thread-id>/
+            user-data/
+              workspace/
+              uploads/
+              outputs/
+            acp-workspace/
+    threads/              # legacy/no-auth fallback only
   logs/
   runtime/
 ```
@@ -244,14 +312,35 @@ Config creation:
 
 ### Packaged MVP
 
-Two packaging options should be evaluated during implementation planning:
+The packaged MVP should use a prebuilt per-platform runtime/source layout, not first-launch dependency installation and not PyInstaller.
 
-| Option | Description | Trade-off |
-|---|---|---|
-| Bundled Python + `uv` environment | Ship Python runtime plus synced backend environment | Closer to source layout, easier upstream merging, larger install and slower first launch. |
-| PyInstaller Gateway binary | Build Gateway into a platform-specific executable | Simpler runtime startup, but higher risk from dynamic imports, LangChain providers, MCP, and config-driven class loading. |
+Artifact layout:
 
-Recommendation for first implementation plan: start with **bundled runtime/source layout** because it preserves DeerFlow's dynamic provider model and avoids fighting PyInstaller too early.
+```text
+resources/
+  backend/
+    app/
+    packages/
+    pyproject.toml
+    uv.lock
+    .venv/                 # built on the target platform/arch in CI
+  frontend/
+    .next/standalone/
+    .next/static/
+    public/
+  runtimes/
+    node/
+    python/                # if not relying on the venv's interpreter path
+```
+
+Packaging rules:
+
+- Build separate artifacts for macOS arm64, macOS x64, Windows x64, and Windows arm64 only if product requires it.
+- Create the Python environment at build time with `uv sync --frozen --all-packages` and any required extras; do not run `uv sync` on the customer's machine for the MVP.
+- Include certificates needed by Python HTTP clients or ensure the bundled Python uses the OS trust store consistently.
+- Preserve DeerFlow source layout and dynamic imports so LangChain providers, MCP configuration, and `resolve_class()` continue to work.
+- Do not use PyInstaller in the MVP. It remains a later optimization after dynamic-provider compatibility is proven.
+- Startup diagnostics must distinguish "Gateway failed to import", "config invalid", "model key missing", "frontend failed to start", and "sandbox runtime missing".
 
 The sandbox container image should not be bundled in the installer. The desktop app should detect Docker/Apple Container and offer a clear setup/pull flow.
 
@@ -261,7 +350,7 @@ Core regression tests:
 
 - Backend tests continue to run unchanged.
 - Add focused tests only for any desktop-mode Gateway hook:
-  - local secret accepted/rejected
+  - desktop token accepted/rejected
   - CORS/CSRF behavior in desktop mode
   - Gateway host/port config if changed
 
@@ -272,6 +361,15 @@ Desktop integration tests:
 - Frontend can load and fetch `/api/models`.
 - LangGraph stream endpoint can start a mock/minimal run when config is valid.
 - Quit cleans child processes.
+- Desktop token is attached by the Next proxy and rejected when missing or incorrect.
+- Existing setup/login flow still creates an admin user and stamps user-scoped thread data.
+- Port collision after allocation is handled by retrying or showing a clear launch error.
+- Stale Gateway/frontend child processes from a crashed prior launch are detected and handled without killing unrelated processes.
+- Corrupted `config.yaml` produces a recoverable diagnostic instead of a blank window.
+- Missing model API keys send the user to setup/config diagnostics, not a generic sidecar failure.
+- Windows paths with spaces work for app-data, backend resources, frontend resources, and sandbox mounts.
+- Missing Docker/Apple Container is reported as a sandbox-mode setup issue; local sandbox mode is not blocked by it.
+- Desktop app update migrates or preserves `config.yaml`, `extensions_config.json`, `desktop-token`, `better-auth-secret`, and `.deer-flow`.
 
 Manual cross-platform smoke matrix:
 
@@ -282,6 +380,13 @@ Manual cross-platform smoke matrix:
 | Windows | LocalSandboxProvider | App launches without Git Bash dependency in packaged mode. |
 | Windows | AioSandboxProvider + Docker Desktop | Sandbox starts and file mounts use Windows-safe host paths. |
 
+Installer smoke:
+
+- macOS unsigned developer build launches from the app bundle.
+- macOS signed/notarized build launches without quarantine surprises once signing is enabled.
+- Windows unpacked developer build launches.
+- Windows installer build launches, writes app-data to `%APPDATA%`, and uninstalls without deleting user data unless explicitly requested.
+
 ## 10. Rollout Plan
 
 1. **Phase 0: Design and implementation plan**
@@ -289,13 +394,15 @@ Manual cross-platform smoke matrix:
    - Write a task-by-task implementation plan.
 2. **Phase 1: Developer desktop shell**
    - Electron app starts existing dev Gateway/frontend.
-   - No production packaging yet.
+   - Contributor-only; may rely on local Node/Python/uv.
+   - No customer packaging and no server-load-reduction claims yet.
 3. **Phase 2: Packaged local runtime**
    - Ship Gateway/frontend as sidecars.
    - Desktop app-data config and logs.
+   - Desktop local token guard.
+   - Existing setup/login flow verified in desktop mode.
    - macOS/Windows smoke tests.
 4. **Phase 3: Hardened desktop mode**
-   - Local secret verification.
    - Native credential storage.
    - update/signing/notarization.
 5. **Phase 4: Optional cloud coordination**
@@ -304,7 +411,6 @@ Manual cross-platform smoke matrix:
 ## 11. Open Questions
 
 - Should desktop MVP require Docker/AIO sandbox for customer deployments, or allow local sandbox by default with clear warnings?
-- Should packaged mode use Next standalone server, static export where possible, or Electron's custom protocol plus API proxy?
 - Should cloud account login be required before local execution, or only before sync/licensed features?
 - What is the target installer/update system: Electron Forge, electron-builder, or a company-standard pipeline?
 - Are enterprise customers expected to run behind corporate proxies that require proxy config for model APIs, MCP, and container image pulls?
