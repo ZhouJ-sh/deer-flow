@@ -20,7 +20,7 @@ DeerFlow 2.0 already has a favorable boundary for desktop migration:
 |---|---|---|
 | Agent runtime | Embedded in Gateway via `RunManager`, `run_agent()`, and `StreamBridge` under `backend/packages/harness/deerflow/runtime/` | A desktop app can start the existing Gateway locally instead of splitting or rewriting the Agent loop. |
 | Public agent API | Frontend talks to `/api/langgraph/*`; nginx or Next rewrites that to Gateway's native `/api/*` routers | The desktop shell can preserve the same browser/API contract. |
-| Sandbox | Abstract `SandboxProvider`; existing `LocalSandboxProvider` and `AioSandboxProvider` | The desktop app can choose local or container sandbox via config, without adding a new sandbox protocol. |
+| Sandbox | Abstract `SandboxProvider`; existing `LocalSandboxProvider` | The desktop MVP uses local sandbox only, avoiding extra runtime packaging and cleanup concerns. |
 | User data paths | `DEER_FLOW_HOME` and `Paths` centralize runtime state and per-thread sandbox directories | Desktop data can live in the OS app-data directory without writing back to the repo checkout. |
 | Frontend | Next.js app uses current origin plus rewrites/env vars for Gateway routing | Desktop can load a local Next server or packaged frontend while keeping frontend API calls mostly unchanged. |
 | Development scripts | `make dev` starts Gateway + Frontend + nginx; Windows local flow already expects Git Bash for scripts | Desktop startup should not depend on nginx or shell scripts in production packaging. |
@@ -111,7 +111,7 @@ Desktop startup:
    - Developer shell: point to `next dev` or an externally running dev URL.
    - Packaged customer runtime: run the packaged Next standalone server on an internal loopback port, then run a desktop HTTP proxy as the browser-facing origin.
 6. It opens a BrowserWindow to the local frontend URL.
-7. On app quit, it terminates child processes and best-effort cleans up sandbox containers whose configured desktop container prefix matches this app install.
+7. On app quit, it terminates child processes. No extra sandbox cleanup is needed because desktop MVP only supports `LocalSandboxProvider`.
 
 ### 4.2 Runtime Ownership
 
@@ -176,17 +176,13 @@ Packaged startup requirements:
 
 ### 4.5 Sandbox Strategy
 
-Use existing sandbox providers:
+Desktop supports **only `LocalSandboxProvider`**.
 
 | Mode | Use case | Default stance |
 |---|---|---|
-| `LocalSandboxProvider` | Simple single-user local workflows | Supported, but keep `allow_host_bash: false` by default. |
-| `AioSandboxProvider` with Docker/Apple Container | Better isolation for code execution | Supported for users who install Docker Desktop or Apple Container. |
-| K8s/provisioner mode | Enterprise managed sandbox pools | Out of scope for desktop MVP unless already configured by a customer. |
+| `LocalSandboxProvider` | Single-user customer desktop workflows | Supported; keep `allow_host_bash: false` by default. |
 
-The desktop shell should not bypass `SandboxProvider` or call host commands directly on behalf of agent tools.
-
-Desktop AIO sandbox configs must set a desktop-specific `container_prefix`, for example `deer-flow-desktop-<install-id>`. Cleanup may only target containers with that exact prefix. It must never call broad cleanup against the generic `deer-flow-sandbox` prefix from a customer desktop app.
+The desktop shell should not bypass `SandboxProvider` or call host commands directly on behalf of agent tools. No container or remote sandbox runtime is bundled or orchestrated by the desktop app.
 
 ## 5. Minimal Core Changes
 
@@ -261,7 +257,6 @@ Deferred security enhancements:
 - Store API keys in macOS Keychain / Windows Credential Manager.
 - Code signing and notarization.
 - Device attestation or cloud license binding.
-- Enterprise policy file for disabling host-local sandbox modes.
 
 ### Desktop Auth Decision
 
@@ -319,7 +314,8 @@ Config creation:
   - `database.sqlite_dir: <desktop-data>/.deer-flow/data`
   - `run_events.backend: db`
   - `checkpointer: null` or omit the legacy `checkpointer` section so unified `database` owns LangGraph state too
-  - `sandbox.container_prefix: deer-flow-desktop-<install-id>` when using `AioSandboxProvider`
+  - `sandbox.use: deerflow.sandbox.local:LocalSandboxProvider`
+  - `sandbox.allow_host_bash: false`
 - A desktop setup screen or launch diagnostic should guide missing model API keys.
 - Existing `config_version` and `make config-upgrade` logic should be reused where practical, but desktop startup should not require Make.
 
@@ -342,6 +338,8 @@ Artifact layout:
 ```text
 resources/
   backend/
+    config.example.yaml
+    extensions_config.example.json
     app/
     packages/
     pyproject.toml
@@ -349,8 +347,8 @@ resources/
     site-packages/          # wheel-installed pure/Python extension deps for the target platform/arch
   frontend/
     .next/standalone/
-    .next/static/
-    public/
+      .next/static/
+      public/
   runtimes/
     node/
     python/
@@ -371,9 +369,9 @@ Packaging rules:
 - Include certificates needed by Python HTTP clients or ensure the bundled Python uses the OS trust store consistently.
 - Preserve DeerFlow source layout and dynamic imports so LangChain providers, MCP configuration, and `resolve_class()` continue to work.
 - Do not use PyInstaller in the MVP. It remains a later optimization after dynamic-provider compatibility is proven.
-- Startup diagnostics must distinguish "Gateway failed to import", "config invalid", "model key missing", "frontend failed to start", and "sandbox runtime missing".
+- Startup diagnostics must distinguish "Gateway failed to import", "config invalid", "model key missing", "frontend failed to start", and "local sandbox configuration invalid".
 
-The sandbox container image should not be bundled in the installer. The desktop app should detect Docker/Apple Container and offer a clear setup/pull flow.
+No separate sandbox runtime is bundled in the installer for the MVP; desktop execution uses `LocalSandboxProvider`.
 
 ## 9. Testing Strategy
 
@@ -403,7 +401,6 @@ Desktop integration tests:
 - Missing model API keys send the user to setup/config diagnostics, not a generic sidecar failure.
 - Windows paths with spaces work for app-data, backend resources, frontend resources, and sandbox mounts.
 - Packaged runtime launches successfully from installed paths containing spaces on macOS and Windows.
-- Missing Docker/Apple Container is reported as a sandbox-mode setup issue; local sandbox mode is not blocked by it.
 - Desktop app update migrates or preserves `config.yaml`, `extensions_config.json`, `desktop-token`, `better-auth-secret`, and `.deer-flow`.
 
 Manual cross-platform smoke matrix:
@@ -411,9 +408,7 @@ Manual cross-platform smoke matrix:
 | Platform | Sandbox | Expected smoke |
 |---|---|---|
 | macOS | LocalSandboxProvider | App launches, model list loads, local thread data created under app-data. |
-| macOS | AioSandboxProvider + Apple Container or Docker | Sandbox health passes and generated artifacts appear under app-data. |
 | Windows | LocalSandboxProvider | App launches without Git Bash dependency in packaged mode. |
-| Windows | AioSandboxProvider + Docker Desktop | Sandbox starts and file mounts use Windows-safe host paths. |
 
 Installer smoke:
 
@@ -445,10 +440,9 @@ Installer smoke:
 
 ## 11. Open Questions
 
-- Should desktop MVP require Docker/AIO sandbox for customer deployments, or allow local sandbox by default with clear warnings?
 - Should cloud account login be required before local execution, or only before sync/licensed features?
 - What is the target installer/update system: Electron Forge, electron-builder, or a company-standard pipeline?
-- Are enterprise customers expected to run behind corporate proxies that require proxy config for model APIs, MCP, and container image pulls?
+- Are enterprise customers expected to run behind corporate proxies that require proxy config for model APIs and MCP?
 
 ## 12. Decision
 
