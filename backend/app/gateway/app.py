@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,7 @@ from app.gateway.auth_middleware import AuthMiddleware
 from app.gateway.config import get_gateway_config
 from app.gateway.csrf_middleware import CSRFMiddleware, get_configured_cors_origins
 from app.gateway.deps import langgraph_runtime
+from app.gateway.desktop_token_middleware import DesktopTokenMiddleware
 from app.gateway.routers import (
     agents,
     artifacts,
@@ -315,6 +317,13 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
 
     # CSRF: Double Submit Cookie pattern for state-changing requests
     app.add_middleware(CSRFMiddleware)
+
+    if os.getenv("DEER_FLOW_DESKTOP") == "1":
+        app.add_middleware(
+            DesktopTokenMiddleware,
+            enabled=True,
+            token_file=os.getenv("DEER_FLOW_DESKTOP_TOKEN_FILE", ""),
+        )
 
     # CORS: the unified nginx endpoint is same-origin by default. Split-origin
     # browser clients must opt in with this explicit Gateway allowlist so CORS

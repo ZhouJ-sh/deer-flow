@@ -716,6 +716,7 @@ All dict-returning methods are validated against Gateway Pydantic response model
 - [Configuration Guide](backend/docs/CONFIGURATION.md) - Setup and configuration instructions
 - [Architecture Overview](backend/CLAUDE.md) - Technical architecture details
 - [Backend Architecture](backend/README.md) - Backend architecture and API reference
+- Desktop local runtime packaging notes: [docs/desktop-local-runtime.md](docs/desktop-local-runtime.md)
 
 ## ⚠️ Security Notice
 
