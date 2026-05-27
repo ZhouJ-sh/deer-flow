@@ -27,6 +27,7 @@ export function startSidecar(options: StartSidecarOptions): SidecarProcess {
     cwd: options.cwd,
     env: options.env,
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
     windowsHide: true,
   });
 
@@ -63,14 +64,14 @@ export function startSidecar(options: StartSidecarOptions): SidecarProcess {
       return;
     }
 
-    child.kill(process.platform === "win32" ? undefined : "SIGTERM");
+    killSidecar(child, "SIGTERM");
 
     const timeout = new Promise<"timeout">((resolve) => {
       setTimeout(() => resolve("timeout"), STOP_TIMEOUT_MS).unref();
     });
 
     if ((await Promise.race([childClosed, timeout])) === "timeout" && !closed) {
-      child.kill("SIGKILL");
+      killSidecar(child, "SIGKILL");
       await childClosed;
     }
   };
@@ -81,6 +82,23 @@ export function startSidecar(options: StartSidecarOptions): SidecarProcess {
     exit,
     stop,
   };
+}
+
+function killSidecar(child: ChildProcess, signal: NodeJS.Signals | undefined) {
+  if (process.platform === "win32") {
+    child.kill(signal);
+    return;
+  }
+
+  if (typeof child.pid === "number") {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // Fall back to killing the direct child below.
+    }
+  }
+  child.kill(signal);
 }
 
 function trackLogLifecycle(log: WriteStream) {

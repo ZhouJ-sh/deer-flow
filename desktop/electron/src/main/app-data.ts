@@ -7,9 +7,11 @@ import { parse, stringify } from "yaml";
 
 export type DesktopDataOptions = {
   root: string;
+  logsDir?: string;
   exampleConfigPath?: string;
   exampleExtensionsConfigPath?: string;
   bundledSkillsPath?: string;
+  syncConfigModelsFromSource?: boolean;
 };
 
 export type DesktopDataPaths = {
@@ -28,6 +30,7 @@ export type DesktopDataPaths = {
   exampleConfigPath?: string;
   exampleExtensionsConfigPath?: string;
   bundledSkillsPath?: string;
+  syncConfigModelsFromSource?: boolean;
 };
 
 const userOnlyFileMode = 0o600;
@@ -40,7 +43,7 @@ export async function ensureDesktopData(options: DesktopDataOptions): Promise<De
     root,
     deerFlowHome,
     dataDir,
-    logsDir: join(root, "logs"),
+    logsDir: resolve(options.logsDir ?? join(root, "logs")),
     runtimeDir: join(root, "runtime"),
     sqliteDir: dataDir,
     configPath: join(root, "config.yaml"),
@@ -52,6 +55,7 @@ export async function ensureDesktopData(options: DesktopDataOptions): Promise<De
     exampleConfigPath: options.exampleConfigPath,
     exampleExtensionsConfigPath: options.exampleExtensionsConfigPath,
     bundledSkillsPath: options.bundledSkillsPath,
+    syncConfigModelsFromSource: options.syncConfigModelsFromSource,
   };
 
   await Promise.all([
@@ -122,6 +126,14 @@ async function ensureConfig(paths: DesktopDataPaths): Promise<void> {
   const config = isRecord(parsed) ? parsed : {};
 
   delete config.checkpointer;
+  let models = Array.isArray(config.models) ? config.models : [];
+  if (paths.syncConfigModelsFromSource && models.length === 0) {
+    const sourceModels = await readSourceModels(paths.exampleConfigPath);
+    if (sourceModels) {
+      models = sourceModels;
+    }
+  }
+  config.models = models;
   config.database = {
     backend: "sqlite",
     sqlite_dir: paths.sqliteDir,
@@ -136,6 +148,18 @@ async function ensureConfig(paths: DesktopDataPaths): Promise<void> {
 
   await writeFile(paths.configPath, stringify(config), { mode: userOnlyFileMode });
   await chmodUserOnly(paths.configPath);
+}
+
+async function readSourceModels(sourcePath?: string): Promise<unknown[] | null> {
+  if (!sourcePath || !(await exists(sourcePath))) {
+    return null;
+  }
+
+  const source = parse(await readFile(sourcePath, "utf8"));
+  if (!isRecord(source) || !Array.isArray(source.models)) {
+    return null;
+  }
+  return source.models;
 }
 
 async function ensureExtensionsConfig(paths: DesktopDataPaths): Promise<void> {

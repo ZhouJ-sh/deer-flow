@@ -124,7 +124,7 @@ dev:
 
 # Start Electron desktop shell in development mode
 desktop-dev:
-	@cd desktop/electron && pnpm dev
+	@$(RUN_WITH_GIT_BASH) ./scripts/desktop-dev.sh
 
 # Start all services in production mode (with optimizations)
 start:

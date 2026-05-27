@@ -44,6 +44,14 @@ export type DesktopRuntime = {
   stop: () => Promise<void>;
 };
 
+export type DesktopDataSources = {
+  exampleConfigPath: string;
+  exampleExtensionsConfigPath: string;
+  bundledSkillsPath: string;
+  logsDir?: string;
+  syncConfigModelsFromSource: boolean;
+};
+
 type RuntimePart = {
   stop: () => Promise<void>;
 };
@@ -219,18 +227,15 @@ export async function startDesktopRuntime(
   options: StartDesktopRuntimeOptions,
 ): Promise<DesktopRuntime> {
   const resources = resolveDesktopResources(options);
-  const bundledSkillsPath = resources.repoRoot
-    ? join(resources.repoRoot, "skills")
-    : join(options.resourcesPath, "skills");
+  const dataSources = resolveDesktopDataSources({
+    packaged: options.packaged,
+    repoRoot: resources.repoRoot,
+    backendDir: resources.backendDir,
+    resourcesPath: options.resourcesPath,
+  });
   const paths = await ensureDesktopData({
     root: options.appDataRoot,
-    exampleConfigPath: resources.repoRoot
-      ? join(resources.repoRoot, "config.example.yaml")
-      : join(resources.backendDir, "config.example.yaml"),
-    exampleExtensionsConfigPath: resources.repoRoot
-      ? join(resources.repoRoot, "extensions_config.example.json")
-      : join(resources.backendDir, "extensions_config.example.json"),
-    bundledSkillsPath,
+    ...dataSources,
   });
   const ports = await allocateDesktopPorts();
   const gatewayOrigin = `http://127.0.0.1:${ports.gatewayPort}`;
@@ -274,7 +279,7 @@ export async function startDesktopRuntime(
       registerFetchPath,
       internalHeaderValue,
     });
-    await waitForHttpReady(proxyOrigin, "frontend", join(paths.logsDir, "next.log"));
+    await waitForHttpReady(proxyOrigin, "frontend", join(paths.logsDir, "frontend.log"));
 
     return {
       proxyOrigin,
@@ -285,6 +290,31 @@ export async function startDesktopRuntime(
   } catch (error) {
     throw await cleanupAfterStartupFailure(error, proxy, next, gateway);
   }
+}
+
+export function resolveDesktopDataSources(options: {
+  packaged: boolean;
+  repoRoot: string | null;
+  backendDir: string;
+  resourcesPath: string;
+}): DesktopDataSources {
+  if (!options.packaged && options.repoRoot) {
+    return {
+      exampleConfigPath: join(options.repoRoot, "config.yaml"),
+      exampleExtensionsConfigPath: join(options.repoRoot, "extensions_config.example.json"),
+      bundledSkillsPath: join(options.repoRoot, "skills"),
+      logsDir: join(options.repoRoot, "logs"),
+      syncConfigModelsFromSource: true,
+    };
+  }
+
+  return {
+    exampleConfigPath: join(options.backendDir, "config.example.yaml"),
+    exampleExtensionsConfigPath: join(options.backendDir, "extensions_config.example.json"),
+    bundledSkillsPath: join(options.resourcesPath, "skills"),
+    logsDir: undefined,
+    syncConfigModelsFromSource: false,
+  };
 }
 
 async function startGateway(options: {
@@ -344,7 +374,7 @@ async function startNext(options: {
       DEER_FLOW_INTERNAL_GATEWAY_HEADER_VALUE: options.internalHeaderValue,
       ...command.env,
     },
-    logPath: join(options.paths.logsDir, "next.log"),
+    logPath: join(options.paths.logsDir, "frontend.log"),
   });
 }
 

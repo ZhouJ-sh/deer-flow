@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -17,6 +18,7 @@ type CapturedRequest = {
 type TestServer = {
   origin: string;
   requests: CapturedRequest[];
+  upgrades: CapturedRequest[];
   close: () => Promise<void>;
 };
 
@@ -49,6 +51,7 @@ async function startRecordingServer(
   handler?: (request: IncomingMessage, response: ServerResponse) => void,
 ): Promise<TestServer> {
   const requests: CapturedRequest[] = [];
+  const upgrades: CapturedRequest[] = [];
   const server = createServer((request, response) => {
     requests.push({
       method: request.method,
@@ -61,6 +64,17 @@ async function startRecordingServer(
     }
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ ok: true, url: request.url }));
+  });
+  server.on("upgrade", (request, socket) => {
+    upgrades.push({
+      method: request.method,
+      url: request.url,
+      desktopToken: request.headers["x-deerflow-desktop-token"] as string | undefined,
+    });
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+    );
+    socket.end();
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -79,6 +93,7 @@ async function startRecordingServer(
   return {
     origin: `http://127.0.0.1:${address.port}`,
     requests,
+    upgrades,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
@@ -109,6 +124,39 @@ async function startTestProxy(options?: {
   proxies.push(proxy);
 
   return { proxy, gateway, next };
+}
+
+async function requestWebSocketUpgrade(origin: string, path: string): Promise<string> {
+  const { hostname, port } = new URL(origin);
+
+  return await new Promise((resolve, reject) => {
+    const socket = connect(Number(port), hostname);
+    let data = "";
+    socket.setEncoding("utf8");
+    socket.setTimeout(2_000, () => {
+      socket.destroy();
+      reject(new Error("websocket upgrade timed out"));
+    });
+    socket.once("error", reject);
+    socket.on("data", (chunk) => {
+      data += chunk;
+    });
+    socket.once("close", () => resolve(data));
+    socket.once("connect", () => {
+      socket.write(
+        [
+          `GET ${path} HTTP/1.1`,
+          `Host: ${hostname}:${port}`,
+          "Connection: Upgrade",
+          "Upgrade: websocket",
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+          "Sec-WebSocket-Version: 13",
+          "",
+          "",
+        ].join("\r\n"),
+      );
+    });
+  });
 }
 
 describe("startDesktopProxy", () => {
@@ -157,6 +205,16 @@ describe("startDesktopProxy", () => {
     expect(response.status).toBe(200);
     expect(gateway!.requests).toHaveLength(0);
     expect(next!.requests).toMatchObject([{ url: "/dashboard?tab=home", desktopToken: undefined }]);
+  });
+
+  test("proxies Next websocket upgrades to Next", async () => {
+    const { proxy, gateway, next } = await startTestProxy();
+
+    const response = await requestWebSocketUpgrade(proxy.origin, "/_next/webpack-hmr?id=test");
+
+    expect(response).toContain("101 Switching Protocols");
+    expect(gateway!.upgrades).toHaveLength(0);
+    expect(next!.upgrades).toMatchObject([{ url: "/_next/webpack-hmr?id=test", desktopToken: undefined }]);
   });
 
   test("rejects browser access to /_desktop-gateway/* with 404", async () => {

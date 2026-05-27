@@ -52,6 +52,7 @@ describe("ensureDesktopData", () => {
 
     const config = parse(await readFile(paths.configPath, "utf8"));
     expect(config.log_level).toBe("info");
+    expect(config.models).toEqual([]);
     expect(config.database).toEqual({
       backend: "sqlite",
       sqlite_dir: paths.sqliteDir,
@@ -121,6 +122,50 @@ describe("ensureDesktopData", () => {
     await expect(readFile(paths.extensionsConfigPath, "utf8")).resolves.toBe(
       `${JSON.stringify(customExtensions, null, 2)}\n`,
     );
+  });
+
+  test("fills empty desktop models from source config when requested", async () => {
+    const root = await makeRoot();
+    const sourceConfigPath = join(root, "repo-config.yaml");
+    await writeFile(
+      sourceConfigPath,
+      [
+        "models:",
+        "  - name: repo-model",
+        "    use: provider:Model",
+        "    model: repo-model-id",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(root, "config.yaml"),
+      [
+        "models: []",
+        "sandbox:",
+        "  use: deerflow.sandbox.local:LocalSandboxProvider",
+        "  allow_host_bash: false",
+        "",
+      ].join("\n"),
+    );
+
+    const paths = await ensureDesktopData({
+      root,
+      exampleConfigPath: sourceConfigPath,
+      syncConfigModelsFromSource: true,
+    });
+
+    const config = parse(await readFile(paths.configPath, "utf8"));
+    expect(config.models).toEqual([{ name: "repo-model", use: "provider:Model", model: "repo-model-id" }]);
+  });
+
+  test("uses an explicit logs directory for development wrappers", async () => {
+    const root = await makeRoot();
+    const logsDir = join(root, "repo", "logs");
+
+    const paths = await ensureDesktopData({ root, logsDir });
+
+    expect(paths.logsDir).toBe(logsDir);
+    await expect(stat(logsDir)).resolves.toMatchObject({ isDirectory: expect.any(Function) });
   });
 
   test("persists existing token and install id, and replaces empty secrets", async () => {

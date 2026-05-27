@@ -7,6 +7,7 @@ import {
   buildNextCommand,
   classifyReadinessFailure,
   cleanupAfterStartupFailure,
+  resolveDesktopDataSources,
   stopRuntime,
 } from "../src/main/runtime.js";
 import { resolveDesktopResources } from "../src/main/paths.js";
@@ -128,6 +129,40 @@ describe("runtime resource resolution", () => {
     });
 
     expect(resources.desktopServerDir).toBe(join(appPath, "dist"));
+  });
+});
+
+describe("desktop data source resolution", () => {
+  test("uses the repository config as the development source config", () => {
+    const repoRoot = resolve("/repo/deer-flow");
+    const backendDir = join(repoRoot, "backend");
+
+    const sources = resolveDesktopDataSources({
+      packaged: false,
+      repoRoot,
+      backendDir,
+      resourcesPath: "/unused",
+    });
+
+    expect(sources.exampleConfigPath).toBe(join(repoRoot, "config.yaml"));
+    expect(sources.logsDir).toBe(join(repoRoot, "logs"));
+    expect(sources.syncConfigModelsFromSource).toBe(true);
+  });
+
+  test("keeps packaged mode on bundled backend example config", () => {
+    const resourcesPath = resolve("/resources");
+    const backendDir = join(resourcesPath, "backend");
+
+    const sources = resolveDesktopDataSources({
+      packaged: true,
+      repoRoot: null,
+      backendDir,
+      resourcesPath,
+    });
+
+    expect(sources.exampleConfigPath).toBe(join(backendDir, "config.example.yaml"));
+    expect(sources.logsDir).toBeUndefined();
+    expect(sources.syncConfigModelsFromSource).toBe(false);
   });
 });
 

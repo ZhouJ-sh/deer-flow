@@ -1,5 +1,6 @@
 import { appendFile, readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 import { URL } from "node:url";
 
 import httpProxy from "http-proxy";
@@ -26,6 +27,7 @@ export async function startDesktopProxy(options: DesktopProxyOptions): Promise<D
   const proxy = httpProxy.createProxyServer({
     changeOrigin: true,
     xfwd: true,
+    ws: true,
   });
 
   proxy.on("proxyRes", (proxyResponse) => {
@@ -59,12 +61,39 @@ export async function startDesktopProxy(options: DesktopProxyOptions): Promise<D
     }
   });
 
+  server.on("upgrade", async (request, socket, head) => {
+    try {
+      const url = new URL(request.url ?? "/", `http://${options.host}:${options.port}`);
+      const route = routeRequest(url, request, options.internalHeaderValue);
+
+      if (route.kind === "not-found") {
+        socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+        return;
+      }
+
+      delete request.headers[DESKTOP_TOKEN_HEADER];
+
+      if (route.kind === "next") {
+        proxy.ws(request, socket, head, { target: options.nextOrigin });
+        return;
+      }
+
+      const token = await readDesktopToken(options.tokenPath);
+      request.headers[DESKTOP_TOKEN_HEADER] = token;
+      request.url = route.pathAndQuery;
+      proxy.ws(request, socket, head, { target: options.gatewayOrigin });
+    } catch (error) {
+      await safeLogProxyError(options.logPath, error);
+      socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+    }
+  });
+
   proxy.on("error", async (error, _request, response) => {
     await safeLogProxyError(options.logPath, error);
     if (response && "writeHead" in response && !response.headersSent) {
       respond(response, 502, "Bad gateway");
     } else if (response && "end" in response) {
-      response.end();
+      endResponse(response);
     }
   });
 
@@ -152,4 +181,8 @@ function respond(response: ServerResponse, statusCode: number, body: string) {
     "cache-control": "no-store",
   });
   response.end(body);
+}
+
+function endResponse(response: ServerResponse | Duplex) {
+  response.end();
 }

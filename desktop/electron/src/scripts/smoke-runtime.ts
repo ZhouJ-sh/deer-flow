@@ -38,7 +38,7 @@ export async function smokeRuntime(options: {
       method: "POST",
       cookies,
       body: {
-        email: `desktop-smoke-${Date.now()}@example.invalid`,
+        email: `desktop-smoke-${Date.now()}@example.com`,
         password: "DesktopSmokePass123",
         confirm_password: "DesktopSmokePass123",
       },

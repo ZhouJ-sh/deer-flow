@@ -25,6 +25,42 @@ async function tempDir() {
   return dir;
 }
 
+async function readChildPid(logPath: string): Promise<number> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    try {
+      const match = (await readFile(logPath, "utf8")).match(/child:(\d+)/);
+      if (match) {
+        return Number(match[1]);
+      }
+    } catch {
+      // Log file may not exist yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("timed out waiting for child pid");
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForProcessExit(pid: number): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (!processExists(pid)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`process ${pid} is still running`);
+}
+
 describe("startSidecar", () => {
   test("captures stdout and stderr in the configured log file", async () => {
     const logPath = await tempLogPath("output.log");
@@ -111,5 +147,42 @@ describe("startSidecar", () => {
     await expect(sidecar.stop()).resolves.toBeUndefined();
     await expect(sidecar.exit).resolves.not.toBe(0);
     await expect(sidecar.stop()).resolves.toBeUndefined();
+  });
+
+  test("stop terminates child process trees on posix", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const logPath = await tempLogPath("process-tree.log");
+    let childPid = 0;
+    const sidecar = startSidecar({
+      name: "process-tree",
+      command: process.execPath,
+      args: [
+        "-e",
+        [
+          "const { spawn } = require('node:child_process');",
+          "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000);'], { stdio: 'ignore' });",
+          "console.log(`child:${child.pid}`);",
+          "setInterval(() => {}, 1000);",
+        ].join(""),
+      ],
+      cwd: process.cwd(),
+      env: {},
+      logPath,
+    });
+
+    try {
+      childPid = await readChildPid(logPath);
+
+      await expect(sidecar.stop()).resolves.toBeUndefined();
+      await expect(sidecar.exit).resolves.not.toBe(0);
+      await expect(waitForProcessExit(childPid)).resolves.toBeUndefined();
+    } finally {
+      if (childPid && processExists(childPid)) {
+        process.kill(childPid, "SIGKILL");
+      }
+    }
   });
 });
